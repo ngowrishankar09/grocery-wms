@@ -15,7 +15,7 @@ from routers.superadmin import router as superadmin_router
 from routers.price_lists import router as price_lists_router
 from routers.email import router as email_router
 from routers.portal import router as portal_router
-from security import hash_password
+from security import hash_password, verify_password
 
 create_tables(engine)
 
@@ -135,13 +135,18 @@ def _seed_company():
 _seed_company()
 
 def _seed_superadmin():
-    """Create a superadmin user if one does not already exist."""
+    """Create or update superadmin credentials from environment variables.
+    Set SUPERADMIN_USERNAME and SUPERADMIN_PASSWORD in Render environment.
+    """
+    sa_username = os.environ.get("SUPERADMIN_USERNAME", "superadmin")
+    sa_password = os.environ.get("SUPERADMIN_PASSWORD", "SuperAdmin@2026")
     db = SessionLocal()
     try:
-        if not db.query(User).filter(User.role == "superadmin").first():
+        existing = db.query(User).filter(User.role == "superadmin").first()
+        if not existing:
             db.add(User(
-                username="superadmin",
-                hashed_password=hash_password("SuperAdmin@2026"),
+                username=sa_username,
+                hashed_password=hash_password(sa_password),
                 full_name="Super Admin",
                 email="superadmin@wms.local",
                 role="superadmin",
@@ -149,6 +154,17 @@ def _seed_superadmin():
                 must_change_password=False,
             ))
             db.commit()
+        else:
+            # Update username/password if env vars differ from stored values
+            changed = False
+            if existing.username != sa_username:
+                existing.username = sa_username
+                changed = True
+            if not verify_password(sa_password, existing.hashed_password):
+                existing.hashed_password = hash_password(sa_password)
+                changed = True
+            if changed:
+                db.commit()
     finally:
         db.close()
 
