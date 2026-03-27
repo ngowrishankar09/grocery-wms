@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Building2, Users, ChevronDown, ChevronUp, Shield, LogOut, CheckCircle, XCircle, RefreshCw } from 'lucide-react'
+import { Building2, Users, ChevronDown, ChevronUp, Shield, LogOut, CheckCircle, XCircle, RefreshCw, Clock } from 'lucide-react'
 import { superAdminAPI } from '../api/client'
 import { useAuth } from '../context/AuthContext'
 
@@ -47,6 +47,26 @@ export default function Superadmin() {
     try {
       await superAdminAPI.updateCompany(company.id, { is_active: !company.is_active })
       setCompanies(cs => cs.map(c => c.id === company.id ? { ...c, is_active: !c.is_active } : c))
+    } finally {
+      setSaving(s => ({ ...s, [company.id]: false }))
+    }
+  }
+
+  const approveCompany = async (company) => {
+    setSaving(s => ({ ...s, [company.id]: true }))
+    try {
+      await superAdminAPI.approveCompany(company.id)
+      setCompanies(cs => cs.map(c => c.id === company.id ? { ...c, status: 'active', is_active: true } : c))
+    } finally {
+      setSaving(s => ({ ...s, [company.id]: false }))
+    }
+  }
+
+  const rejectCompany = async (company) => {
+    setSaving(s => ({ ...s, [company.id]: true }))
+    try {
+      await superAdminAPI.rejectCompany(company.id)
+      setCompanies(cs => cs.map(c => c.id === company.id ? { ...c, status: 'rejected', is_active: false } : c))
     } finally {
       setSaving(s => ({ ...s, [company.id]: false }))
     }
@@ -101,20 +121,70 @@ export default function Superadmin() {
 
       <div className="max-w-4xl mx-auto px-4 py-8">
         {/* Stats */}
-        <div className="grid grid-cols-3 gap-4 mb-8">
+        <div className="grid grid-cols-4 gap-4 mb-8">
           <div className="bg-white rounded-xl border border-gray-200 p-5">
             <p className="text-sm text-gray-500">Total Companies</p>
             <p className="text-3xl font-bold text-gray-900 mt-1">{companies.length}</p>
           </div>
           <div className="bg-white rounded-xl border border-gray-200 p-5">
             <p className="text-sm text-gray-500">Active</p>
-            <p className="text-3xl font-bold text-green-600 mt-1">{companies.filter(c => c.is_active).length}</p>
+            <p className="text-3xl font-bold text-green-600 mt-1">{companies.filter(c => c.status === 'active').length}</p>
+          </div>
+          <div className="bg-amber-50 rounded-xl border border-amber-200 p-5">
+            <p className="text-sm text-amber-600">Pending Approval</p>
+            <p className="text-3xl font-bold text-amber-600 mt-1">{companies.filter(c => c.status === 'pending').length}</p>
           </div>
           <div className="bg-white rounded-xl border border-gray-200 p-5">
             <p className="text-sm text-gray-500">Total Users</p>
             <p className="text-3xl font-bold text-gray-900 mt-1">{companies.reduce((s, c) => s + (c.user_count || 0), 0)}</p>
           </div>
         </div>
+
+        {/* Pending Approvals */}
+        {companies.filter(c => c.status === 'pending').length > 0 && (
+          <div className="bg-white rounded-xl border border-amber-300 overflow-hidden mb-6">
+            <div className="px-5 py-4 border-b border-amber-100 flex items-center gap-2 bg-amber-50">
+              <Clock size={16} className="text-amber-600" />
+              <h2 className="font-semibold text-amber-800">Pending Approvals</h2>
+              <span className="ml-auto bg-amber-200 text-amber-800 text-xs font-bold rounded-full px-2 py-0.5">
+                {companies.filter(c => c.status === 'pending').length}
+              </span>
+            </div>
+            <div className="divide-y divide-gray-100">
+              {companies.filter(c => c.status === 'pending').map(company => (
+                <div key={company.id} className="px-5 py-4 flex items-center gap-4">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium text-gray-900">{company.name}</span>
+                      <span className="text-xs text-gray-400 font-mono">#{company.id}</span>
+                      <span className="inline-flex items-center gap-1 text-xs text-amber-700 bg-amber-100 rounded-full px-2 py-0.5">
+                        <Clock size={10} /> Pending
+                      </span>
+                    </div>
+                    <div className="text-xs text-gray-400 mt-0.5">
+                      Slug: {company.slug} &bull; Registered: {company.created_at ? new Date(company.created_at).toLocaleDateString() : '—'}
+                      &bull; {company.user_count} user{company.user_count !== 1 ? 's' : ''}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => approveCompany(company)}
+                    disabled={saving[company.id]}
+                    className="text-xs px-4 py-1.5 rounded-lg font-medium bg-green-50 text-green-700 hover:bg-green-100 transition-colors"
+                  >
+                    {saving[company.id] ? '…' : 'Approve'}
+                  </button>
+                  <button
+                    onClick={() => rejectCompany(company)}
+                    disabled={saving[company.id]}
+                    className="text-xs px-4 py-1.5 rounded-lg font-medium bg-red-50 text-red-600 hover:bg-red-100 transition-colors"
+                  >
+                    {saving[company.id] ? '…' : 'Reject'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Companies list */}
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
@@ -137,7 +207,15 @@ export default function Superadmin() {
                       <div className="flex items-center gap-2">
                         <span className="font-medium text-gray-900 truncate">{company.name}</span>
                         <span className="text-xs text-gray-400 font-mono">#{company.id}</span>
-                        {company.is_active ? (
+                        {company.status === 'pending' ? (
+                          <span className="inline-flex items-center gap-1 text-xs text-amber-700 bg-amber-100 rounded-full px-2 py-0.5">
+                            <Clock size={10} /> Pending
+                          </span>
+                        ) : company.status === 'rejected' ? (
+                          <span className="inline-flex items-center gap-1 text-xs text-gray-600 bg-gray-100 rounded-full px-2 py-0.5">
+                            <XCircle size={10} /> Rejected
+                          </span>
+                        ) : company.is_active ? (
                           <span className="inline-flex items-center gap-1 text-xs text-green-700 bg-green-100 rounded-full px-2 py-0.5">
                             <CheckCircle size={10} /> Active
                           </span>

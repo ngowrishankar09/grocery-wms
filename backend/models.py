@@ -17,6 +17,7 @@ class Company(Base):
     slug       = Column(String, unique=True, index=True, nullable=False)
     plan       = Column(String, default="standard")
     is_active  = Column(Boolean, default=True)
+    status     = Column(String, default="pending")  # pending | active | suspended
     created_at = Column(DateTime, default=datetime.utcnow)
 
 class WarehouseEnum(str, enum.Enum):

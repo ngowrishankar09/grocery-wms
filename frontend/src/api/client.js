@@ -351,6 +351,8 @@ export const superAdminAPI = {
   companies:     ()         => api.get('/superadmin/companies'),
   updateCompany: (id, data) => api.patch(`/superadmin/companies/${id}`, data),
   companyUsers:  (id)       => api.get(`/superadmin/companies/${id}/users`),
+  approveCompany: (id)      => api.post(`/superadmin/companies/${id}/approve`),
+  rejectCompany:  (id)      => api.post(`/superadmin/companies/${id}/reject`),
 }
 
 export default api

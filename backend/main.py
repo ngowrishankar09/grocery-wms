@@ -91,6 +91,8 @@ def _migrate():
         ("delivery_runs",           "company_id", "INTEGER"),
         ("notifications",           "company_id", "INTEGER"),
         ("quickbooks_config",       "company_id", "INTEGER"),
+        # Company approval workflow
+        ("companies", "status", "VARCHAR DEFAULT 'active'"),
     ]
     with engine.connect() as conn:
         for table, col, type_def in migrations:

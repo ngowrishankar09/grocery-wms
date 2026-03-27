@@ -29,15 +29,25 @@ class SetPasswordIn(BaseModel):
 
 @router.post("/token", response_model=Token)
 def login(form: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    user = db.query(User).filter(
-        User.username == form.username,
-        User.is_active == True
-    ).first()
+    user = db.query(User).filter(User.username == form.username).first()
     if not user or not verify_password(form.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
+        )
+    # Check company approval status
+    company = db.query(Company).filter(Company.id == user.company_id).first()
+    company_status = getattr(company, 'status', 'active') if company else 'active'
+    if company_status == 'pending':
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your account is pending approval by the platform administrator.",
+        )
+    if not user.is_active or company_status == 'suspended':
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your account has been suspended. Please contact support.",
         )
     # Update last login
     user.last_login = datetime.utcnow()
@@ -124,7 +134,7 @@ def register_company(data: RegisterIn, db: Session = Depends(get_db)):
     i = 1
     while db.query(Company).filter(Company.slug == slug).first():
         slug = f"{base}-{i}"; i += 1
-    company = Company(name=data.company_name, slug=slug)
+    company = Company(name=data.company_name, slug=slug, is_active=False, status="pending")
     db.add(company); db.flush()
     user = User(
         username=data.admin_username,
@@ -138,6 +148,5 @@ def register_company(data: RegisterIn, db: Session = Depends(get_db)):
     db.add(user)
     profile = CompanyProfile(company_id=company.id, name=data.company_name)
     db.add(profile)
-    db.commit(); db.refresh(user)
-    token = create_access_token({"sub": user.username, "role": user.role, "company_id": user.company_id})
-    return {"access_token": token, "token_type": "bearer", "user": _fmt_user(user)}
+    db.commit()
+    return {"status": "pending_approval"}

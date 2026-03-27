@@ -13,6 +13,7 @@ def list_companies(db: Session = Depends(get_db), _=Depends(require_superadmin))
         {
             "id": c.id, "name": c.name, "slug": c.slug,
             "plan": c.plan, "is_active": c.is_active,
+            "status": getattr(c, 'status', 'active') or 'active',
             "created_at": c.created_at.isoformat() if c.created_at else None,
             "user_count": db.query(User).filter(User.company_id == c.id).count(),
         }
@@ -24,9 +25,29 @@ def update_company(company_id: int, data: dict, db: Session = Depends(get_db), _
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
         raise HTTPException(404, "Company not found")
-    for key in ("is_active", "plan", "name"):
+    for key in ("is_active", "plan", "name", "status"):
         if key in data:
             setattr(company, key, data[key])
+    db.commit()
+    return {"ok": True}
+
+@router.post("/companies/{company_id}/approve")
+def approve_company(company_id: int, db: Session = Depends(get_db), _=Depends(require_superadmin)):
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+    company.status = "active"
+    company.is_active = True
+    db.commit()
+    return {"ok": True}
+
+@router.post("/companies/{company_id}/reject")
+def reject_company(company_id: int, db: Session = Depends(get_db), _=Depends(require_superadmin)):
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+    company.status = "rejected"
+    company.is_active = False
     db.commit()
     return {"ok": True}
 

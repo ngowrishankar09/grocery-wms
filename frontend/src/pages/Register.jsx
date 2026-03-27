@@ -41,18 +41,21 @@ export default function Register() {
       <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex items-center justify-center p-4">
         <div className="w-full max-w-sm text-center">
           <div className="bg-white rounded-2xl shadow-2xl p-8">
-            <div className="inline-flex items-center justify-center w-16 h-16 bg-green-100 rounded-full mb-4">
-              <CheckCircle className="text-green-600" size={32} />
+            <div className="inline-flex items-center justify-center w-16 h-16 bg-amber-100 rounded-full mb-4">
+              <CheckCircle className="text-amber-600" size={32} />
             </div>
-            <h2 className="text-xl font-bold text-gray-900 mb-2">Account Created!</h2>
-            <p className="text-gray-500 text-sm mb-6">
-              Your company workspace is ready. Sign in with your admin credentials to get started.
+            <h2 className="text-xl font-bold text-gray-900 mb-2">Registration Submitted!</h2>
+            <p className="text-gray-500 text-sm mb-2">
+              Your account is <span className="font-semibold text-amber-600">pending approval</span> by the platform administrator.
+            </p>
+            <p className="text-gray-400 text-xs mb-6">
+              You'll be able to sign in once your account has been approved. This usually takes less than 24 hours.
             </p>
             <button
               onClick={() => navigate('/login')}
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2.5 rounded-xl transition-colors"
+              className="w-full bg-gray-800 hover:bg-gray-900 text-white font-semibold py-2.5 rounded-xl transition-colors"
             >
-              Go to Login
+              Back to Login
             </button>
           </div>
         </div>
