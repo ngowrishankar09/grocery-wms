@@ -8,6 +8,7 @@ import PortalCatalog  from './pages/portal/PortalCatalog'
 import PortalOrders   from './pages/portal/PortalOrders'
 import PortalInvoices from './pages/portal/PortalInvoices'
 import Dashboard from './pages/Dashboard'
+import Home from './pages/Home'
 import Inventory from './pages/Inventory'
 import Receiving from './pages/Receiving'
 import Orders from './pages/Orders'
@@ -38,7 +39,7 @@ import Superadmin from './pages/Superadmin'
 // ── Admin-only route guard ─────────────────────────────────────
 function AdminOnly({ children }) {
   const { user } = useAuth()
-  if (user?.role !== 'admin') return <Navigate to="/" replace />
+  if (user?.role !== 'admin') return <Navigate to="/app" replace />
   return children
 }
 
@@ -46,8 +47,16 @@ function AdminOnly({ children }) {
 function SuperadminOnly({ children }) {
   const { user } = useAuth()
   if (!user) return <Navigate to="/login" replace />
-  if (user.role !== 'superadmin') return <Navigate to="/" replace />
+  if (user.role !== 'superadmin') return <Navigate to="/app" replace />
   return children
+}
+
+// ── Public home — shows landing page or redirects if logged in ─
+function HomeRoute() {
+  const { user } = useAuth()
+  if (user?.role === 'superadmin') return <Navigate to="/superadmin" replace />
+  if (user) return <Navigate to="/app" replace />
+  return <Home />
 }
 
 // ── Protected route wrapper ───────────────────────────────────
@@ -63,7 +72,7 @@ function ProtectedRoutes({ lang, setLang }) {
   return (
     <Layout lang={lang} setLang={setLang}>
       <Routes>
-        <Route path="/"                element={<Dashboard      lang={lang} />} />
+        <Route path="/app"             element={<Dashboard      lang={lang} />} />
         <Route path="/inventory"       element={<Inventory      lang={lang} />} />
         <Route path="/receiving"       element={<Receiving      lang={lang} />} />
         <Route path="/orders"          element={<Orders         lang={lang} />} />
@@ -89,7 +98,7 @@ function ProtectedRoutes({ lang, setLang }) {
         <Route path="/drivers"         element={<Drivers />} />
         <Route path="/users"           element={<AdminOnly><Users /></AdminOnly>} />
         <Route path="/price-lists"     element={<PriceLists />} />
-        <Route path="*"                element={<Navigate to="/" replace />} />
+        <Route path="*"                element={<Navigate to="/app" replace />} />
       </Routes>
     </Layout>
   )
@@ -102,6 +111,8 @@ function App() {
     <AuthProvider>
       <BrowserRouter>
         <Routes>
+          {/* Public home — landing page */}
+          <Route path="/"               element={<HomeRoute />} />
           <Route path="/login"          element={<LoginRedirect />} />
           <Route path="/register"       element={<Register />} />
           <Route path="/superadmin"     element={<SuperadminOnly><Superadmin /></SuperadminOnly>} />
@@ -118,11 +129,11 @@ function App() {
   )
 }
 
-// Redirect to / if already logged in
+// Redirect to /app if already logged in
 function LoginRedirect() {
   const { user } = useAuth()
   if (user?.role === 'superadmin') return <Navigate to="/superadmin" replace />
-  if (user) return <Navigate to="/" replace />
+  if (user) return <Navigate to="/app" replace />
   return <Login />
 }
 

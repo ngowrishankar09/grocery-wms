@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
 import { dashboardAPI } from '../api/client'
 import { useT } from '../i18n/translations'
+import { useAuth } from '../context/AuthContext'
 import {
   AlertTriangle, Package, TrendingDown, Clock, ShoppingCart, ArrowRight,
   TrendingUp, Archive, BarChart2, RefreshCw, Zap, CheckCircle,
   Receipt, Truck, UserCircle2, RotateCcw, FileText, Plus,
-  Activity, MapPin, ChevronRight
+  Activity, MapPin, ChevronRight, Boxes, DollarSign, TrendingUp as Trend
 } from 'lucide-react'
 import { Link, useNavigate } from 'react-router-dom'
 
@@ -254,9 +255,93 @@ function OpsStatusRow({ summary }) {
   )
 }
 
+// ── Welcome Hero Card ─────────────────────────────────────────
+function WelcomeCard({ user, summary, onRefresh, refreshing }) {
+  const hour = new Date().getHours()
+  const greeting = hour < 5 ? 'Good night' : hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
+  const name = user?.full_name?.split(' ')[0] || user?.username || ''
+  const date = new Date().toLocaleDateString('en', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
+
+  const hero = [
+    {
+      label: 'Total SKUs',
+      value: summary?.total_skus ?? '—',
+      icon: Boxes,
+      sub: `${(summary?.total_cases_in_stock ?? 0).toLocaleString()} cases`,
+    },
+    {
+      label: 'Pending Orders',
+      value: summary?.pending_orders ?? '—',
+      icon: ShoppingCart,
+      sub: summary?.overdue_orders > 0 ? `${summary.overdue_orders} overdue` : 'all on time',
+      warn: summary?.overdue_orders > 0,
+    },
+    {
+      label: 'Monthly Revenue',
+      value: `$${((summary?.invoiced_this_month ?? 0)).toLocaleString('en', { maximumFractionDigits: 0 })}`,
+      icon: DollarSign,
+      sub: `$${((summary?.invoice_outstanding ?? 0)).toLocaleString('en', { maximumFractionDigits: 0 })} outstanding`,
+    },
+    {
+      label: 'Cases Dispatched',
+      value: (summary?.dispatched_this_month ?? 0).toLocaleString(),
+      icon: Truck,
+      sub: 'this month',
+    },
+  ]
+
+  return (
+    <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-blue-600 via-blue-700 to-indigo-800 p-6 text-white shadow-lg">
+      {/* Decorative circles */}
+      <div className="pointer-events-none absolute -right-12 -top-12 h-52 w-52 rounded-full bg-white/5" />
+      <div className="pointer-events-none absolute -bottom-10 left-16 h-36 w-36 rounded-full bg-white/5" />
+      <div className="pointer-events-none absolute right-1/3 top-0 h-24 w-24 rounded-full bg-white/5" />
+
+      {/* Top row */}
+      <div className="relative flex items-start justify-between">
+        <div>
+          <div className="mb-2 flex items-center gap-2">
+            <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-green-400" />
+            <span className="text-xs font-semibold uppercase tracking-widest text-blue-200">Live Dashboard</span>
+          </div>
+          <h2 className="text-2xl font-bold leading-tight">
+            {greeting}{name ? `, ${name}` : ''}!
+          </h2>
+          <p className="mt-1 text-sm text-blue-200">{date}</p>
+        </div>
+        <button
+          onClick={onRefresh}
+          disabled={refreshing}
+          className="flex items-center gap-2 rounded-xl bg-white/10 px-3 py-1.5 text-sm text-blue-100 transition-colors hover:bg-white/20 hover:text-white disabled:opacity-50"
+        >
+          <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
+          Refresh
+        </button>
+      </div>
+
+      {/* Stats row */}
+      <div className="relative mt-5 grid grid-cols-2 gap-4 border-t border-white/20 pt-5 sm:grid-cols-4">
+        {hero.map(({ label, value, icon: Icon, sub, warn }) => (
+          <div key={label} className="flex items-start gap-3">
+            <div className="mt-0.5 rounded-lg bg-white/10 p-1.5 flex-shrink-0">
+              <Icon size={14} className={warn ? 'text-red-300' : 'text-blue-200'} />
+            </div>
+            <div>
+              <div className={`text-xl font-bold leading-none ${warn ? 'text-red-300' : 'text-white'}`}>{value}</div>
+              <div className="mt-0.5 text-xs text-blue-300">{label}</div>
+              <div className={`mt-0.5 text-[10px] ${warn ? 'text-red-300' : 'text-blue-400'}`}>{sub}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 // ── Main Dashboard ────────────────────────────────────────────
 export default function Dashboard({ lang }) {
   const t = useT(lang)
+  const { user } = useAuth()
   const [data,      setData]      = useState(null)
   const [loading,   setLoading]   = useState(true)
   const [refreshing,setRefreshing] = useState(false)
@@ -297,18 +382,8 @@ export default function Dashboard({ lang }) {
   return (
     <div className="space-y-5">
 
-      {/* ── Header ── */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-900">{t('dashboard')}</h2>
-          <p className="text-sm text-gray-400 mt-0.5">{new Date().toLocaleDateString('en', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
-        </div>
-        <button onClick={() => load(true)} disabled={refreshing}
-          className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 px-3 py-1.5 rounded-lg hover:bg-gray-100">
-          <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
-          Refresh
-        </button>
-      </div>
+      {/* ── Welcome Hero ── */}
+      <WelcomeCard user={user} summary={summary} onRefresh={() => load(true)} refreshing={refreshing} />
 
       {/* ── Alert banner ── */}
       {hasAlerts && (
