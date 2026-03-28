@@ -100,7 +100,7 @@ def _migrate():
                 conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {type_def}"))
                 conn.commit()
             except Exception:
-                pass  # column already exists
+                conn.rollback()  # PostgreSQL: reset aborted transaction so next migration can run
 
 _migrate()
 
