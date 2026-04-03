@@ -95,6 +95,20 @@ export const dashboardAPI = {
   get: () => api.get('/dashboard/'),
 }
 
+export const warehouseTaskAPI = {
+  list:         (params)          => api.get('/warehouse-tasks/', { params }),
+  stats:        ()                => api.get('/warehouse-tasks/stats'),
+  myTasks:      ()                => api.get('/warehouse-tasks/my-tasks'),
+  create:       (data)            => api.post('/warehouse-tasks/', data),
+  start:        (id)              => api.post(`/warehouse-tasks/${id}/start`),
+  confirm:      (id, data)        => api.post(`/warehouse-tasks/${id}/confirm`, data || {}),
+  cancel:       (id)              => api.post(`/warehouse-tasks/${id}/cancel`),
+  assign:       (id, userId)      => api.patch(`/warehouse-tasks/${id}/assign?user_id=${userId}`),
+  blockStock:   (data)            => api.post('/warehouse-tasks/block-stock', data),
+  releaseStock: (data)            => api.post('/warehouse-tasks/release-stock', data),
+  stockSummary: (skuId, warehouse) => api.get(`/warehouse-tasks/stock-summary/${skuId}`, { params: warehouse ? { warehouse } : {} }),
+}
+
 export const settingsAPI = {
   // Warehouses
   listWarehouses: () => api.get('/settings/warehouses'),

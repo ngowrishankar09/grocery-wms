@@ -159,7 +159,7 @@ class BinLocation(Base):
 
     inventory_items = relationship("Inventory", back_populates="bin_location")
 
-# ─── Inventory (live stock per SKU per warehouse) ─────────────
+# ─── Inventory (live stock per SKU per warehouse per stock type) ──
 class Inventory(Base):
     __tablename__ = "inventory"
 
@@ -168,6 +168,9 @@ class Inventory(Base):
     sku_id          = Column(Integer, ForeignKey("skus.id"), nullable=False)
     warehouse       = Column(String, nullable=False)
     cases_on_hand   = Column(Integer, default=0)
+    # stock_type: unrestricted (available for orders) | inspection (QI hold) |
+    #             blocked (quarantine/damaged) | allocated (locked for a pick task)
+    stock_type      = Column(String, default="unrestricted", nullable=False)
     updated_at      = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     bin_location_id = Column(Integer, ForeignKey("bin_locations.id"), nullable=True)
 
@@ -714,6 +717,51 @@ class User(Base):
     must_change_password = Column(Boolean, default=False)
     created_at    = Column(DateTime, default=datetime.utcnow)
     last_login    = Column(DateTime, nullable=True)
+
+
+# ─── Warehouse Task (every physical movement is a task) ───────
+class WarehouseTask(Base):
+    """
+    Every movement in the warehouse (pick, receive, putaway, transfer, stocktake)
+    is represented as a WarehouseTask. This gives full audit trail, FEFO batch
+    locking, and the ability to track labour/productivity.
+    """
+    __tablename__ = "warehouse_tasks"
+
+    id            = Column(Integer, primary_key=True, index=True)
+    company_id    = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
+
+    # Task type: pick | receive | putaway | transfer | stocktake | block | release
+    task_type     = Column(String, nullable=False, index=True)
+    # Status: pending → in_progress → confirmed | cancelled
+    status        = Column(String, default="pending", nullable=False, index=True)
+
+    # What is being moved
+    sku_id        = Column(Integer, ForeignKey("skus.id"), nullable=True)
+    batch_id      = Column(Integer, ForeignKey("batches.id"), nullable=True)  # FEFO-locked batch
+    warehouse     = Column(String, nullable=True)
+    from_bin_id   = Column(Integer, ForeignKey("bin_locations.id"), nullable=True)
+    to_bin_id     = Column(Integer, ForeignKey("bin_locations.id"), nullable=True)
+    quantity      = Column(Integer, nullable=False, default=0)
+    confirmed_qty = Column(Integer, nullable=True)  # actual qty confirmed by worker
+
+    # Source documents
+    order_id      = Column(Integer, ForeignKey("orders.id"), nullable=True)
+    order_item_id = Column(Integer, ForeignKey("order_items.id"), nullable=True)
+    transfer_id   = Column(Integer, ForeignKey("transfers.id"), nullable=True)
+
+    # People
+    assigned_to   = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_by    = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+    notes         = Column(Text, nullable=True)
+    created_at    = Column(DateTime, default=datetime.utcnow)
+    started_at    = Column(DateTime, nullable=True)
+    confirmed_at  = Column(DateTime, nullable=True)
+
+    sku           = relationship("SKU")
+    batch         = relationship("Batch")
+    order         = relationship("Order")
 
 
 def get_engine(db_path="./wms.db"):

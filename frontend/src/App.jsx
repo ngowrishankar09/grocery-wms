@@ -35,6 +35,7 @@ import PriceLists from './pages/PriceLists'
 import ForcePasswordChange from './pages/ForcePasswordChange'
 import Register from './pages/Register'
 import Superadmin from './pages/Superadmin'
+import WarehouseTasks from './pages/WarehouseTasks'
 
 // ── Admin-only route guard ─────────────────────────────────────
 function AdminOnly({ children }) {
@@ -98,6 +99,7 @@ function ProtectedRoutes({ lang, setLang }) {
         <Route path="/drivers"         element={<Drivers />} />
         <Route path="/users"           element={<AdminOnly><Users /></AdminOnly>} />
         <Route path="/price-lists"     element={<PriceLists />} />
+        <Route path="/warehouse-tasks" element={<WarehouseTasks />} />
         <Route path="*"                element={<Navigate to="/app" replace />} />
       </Routes>
     </Layout>

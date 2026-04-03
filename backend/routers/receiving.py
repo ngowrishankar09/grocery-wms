@@ -32,16 +32,26 @@ def generate_batch_code(sku_code: str, received_date: date, db: Session) -> str:
     suffix = chr(65 + count)  # A, B, C...
     return f"{prefix}-{suffix}"
 
-def update_inventory(sku_id: int, warehouse: str, delta: int, db: Session, company_id: int = None):
+def update_inventory(sku_id: int, warehouse: str, delta: int, db: Session,
+                     company_id: int = None, stock_type: str = "unrestricted"):
+    """
+    Update inventory for a specific stock_type bucket.
+    stock_type: unrestricted | inspection | blocked | allocated
+    """
     q = db.query(Inventory).filter(
         Inventory.sku_id == sku_id,
         Inventory.warehouse == warehouse,
+        Inventory.stock_type == stock_type,
     )
     if company_id is not None:
         q = q.filter(Inventory.company_id == company_id)
     inv = q.first()
     if not inv:
-        inv = Inventory(sku_id=sku_id, warehouse=warehouse, cases_on_hand=0, company_id=company_id)
+        inv = Inventory(
+            sku_id=sku_id, warehouse=warehouse,
+            cases_on_hand=0, company_id=company_id,
+            stock_type=stock_type,
+        )
         db.add(inv)
         db.flush()
     inv.cases_on_hand = max(0, inv.cases_on_hand + delta)

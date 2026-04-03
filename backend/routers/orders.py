@@ -9,7 +9,7 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from database import get_db
 from models import (
     Order, OrderItem, DispatchItem, Batch,
-    Inventory, SKU, MonthlyConsumption, BinLocation
+    Inventory, SKU, MonthlyConsumption, BinLocation, WarehouseTask
 )
 from routers.receiving import update_inventory, update_monthly_consumption
 from security import get_current_user, get_company_id
@@ -53,35 +53,53 @@ def get_fifo_batches(sku_id: int, db: Session) -> List[Batch]:
         Batch.received_date.asc()
     ).all()
 
+def get_unrestricted_qty(sku_id: int, warehouse: str, db: Session, company_id: int = None) -> int:
+    """Return unrestricted cases on hand for a SKU in a warehouse."""
+    q = db.query(Inventory).filter(
+        Inventory.sku_id == sku_id,
+        Inventory.warehouse == warehouse,
+        Inventory.stock_type == "unrestricted",
+    )
+    if company_id is not None:
+        q = q.filter(Inventory.company_id == company_id)
+    inv = q.first()
+    return inv.cases_on_hand if inv else 0
+
+
 def build_pick_list(sku_id: int, cases_needed: int, db: Session, company_id: int = None):
     """
-    Build pick list using FIFO/FEFO.
+    Build FEFO pick list using only UNRESTRICTED stock.
     Prefers WH1 first, then WH2.
     Returns list of {batch, warehouse, cases} and unfulfilled qty.
     """
     picks = []
     remaining = cases_needed
 
-    # Try WH1 first
     for wh in ["WH1", "WH2"]:
         if remaining <= 0:
             break
+        # Only pick up to what's in unrestricted inventory (prevents overselling)
+        avail = get_unrestricted_qty(sku_id, wh, db, company_id)
+        if avail <= 0:
+            continue
+
         q = db.query(Batch).filter(
             Batch.sku_id == sku_id,
             Batch.warehouse == wh,
-            Batch.cases_remaining > 0
+            Batch.cases_remaining > 0,
         )
         if company_id is not None:
             q = q.filter(Batch.company_id == company_id)
+        # FEFO: earliest expiry first, then earliest received
         batches = q.order_by(
             Batch.expiry_date.asc().nullslast(),
             Batch.received_date.asc()
         ).all()
 
         for batch in batches:
-            if remaining <= 0:
+            if remaining <= 0 or avail <= 0:
                 break
-            take = min(batch.cases_remaining, remaining)
+            take = min(batch.cases_remaining, remaining, avail)
             picks.append({
                 "batch_id": batch.id,
                 "batch_code": batch.batch_code,
@@ -90,6 +108,7 @@ def build_pick_list(sku_id: int, cases_needed: int, db: Session, company_id: int
                 "expiry_date": batch.expiry_date.isoformat() if batch.expiry_date else None,
             })
             remaining -= take
+            avail -= take
 
     return picks, remaining  # remaining > 0 means partial fulfillment
 
@@ -246,43 +265,72 @@ def dispatch_order(
     today = date.today()
     dispatched_items = []
 
+    # Check if warehouse tasks (with FEFO-locked batches) exist for this order
+    pick_tasks = db.query(WarehouseTask).filter(
+        WarehouseTask.order_id == order_id,
+        WarehouseTask.task_type == "pick",
+        WarehouseTask.status.in_(["pending", "in_progress", "confirmed"]),
+        WarehouseTask.company_id == company_id,
+    ).all()
+    use_tasks = len(pick_tasks) > 0
+
     for item in order.items:
-        # Use actual cases_picked from mobile picking if available; fall back to cases_requested
-        # for orders dispatched directly without going through the mobile picking flow.
         target_cases = (item.cases_picked or 0) if (item.cases_picked or 0) > 0 else item.cases_requested
-        picks, unfulfilled = build_pick_list(item.sku_id, target_cases, db, company_id)
         fulfilled = 0
 
-        for pick in picks:
-            batch = db.query(Batch).filter(Batch.id == pick["batch_id"]).first()
-            cases = pick["cases_to_pick"]
-
-            # Deduct from batch
-            batch.cases_remaining -= cases
-
-            # Deduct from inventory
-            update_inventory(item.sku_id, pick["warehouse"], -cases, db, company_id)
-
-            # Update monthly consumption
-            update_monthly_consumption(item.sku_id, today.year, today.month, 0, db, company_id)
-            mc = db.query(MonthlyConsumption).filter(
-                MonthlyConsumption.sku_id == item.sku_id,
-                MonthlyConsumption.year == today.year,
-                MonthlyConsumption.month == today.month,
-                MonthlyConsumption.company_id == company_id,
-            ).first()
-            if mc:
-                mc.cases_dispatched += cases
-
-            # Record dispatch item
-            dispatch_item = DispatchItem(
-                order_item_id=item.id,
-                batch_id=pick["batch_id"],
-                warehouse=pick["warehouse"],
-                cases_picked=cases,
-            )
-            db.add(dispatch_item)
-            fulfilled += cases
+        if use_tasks:
+            # Use FEFO-locked batch assignments from warehouse tasks
+            item_tasks = [t for t in pick_tasks if t.order_item_id == item.id]
+            for task in item_tasks:
+                cases = task.confirmed_qty or task.quantity
+                batch = db.query(Batch).filter(Batch.id == task.batch_id).first()
+                if not batch:
+                    continue
+                batch.cases_remaining -= cases
+                # Deduct from allocated (was moved from unrestricted on send_to_picking)
+                update_inventory(item.sku_id, task.warehouse, -cases, db, company_id, "allocated")
+                update_monthly_consumption(item.sku_id, today.year, today.month, 0, db, company_id)
+                mc = db.query(MonthlyConsumption).filter(
+                    MonthlyConsumption.sku_id == item.sku_id,
+                    MonthlyConsumption.year == today.year,
+                    MonthlyConsumption.month == today.month,
+                    MonthlyConsumption.company_id == company_id,
+                ).first()
+                if mc:
+                    mc.cases_dispatched += cases
+                db.add(DispatchItem(
+                    order_item_id=item.id,
+                    batch_id=task.batch_id,
+                    warehouse=task.warehouse,
+                    cases_picked=cases,
+                ))
+                task.status = "confirmed"
+                task.confirmed_at = datetime.utcnow()
+                fulfilled += cases
+        else:
+            # Direct dispatch without picking flow — use FEFO from unrestricted
+            picks, _ = build_pick_list(item.sku_id, target_cases, db, company_id)
+            for pick in picks:
+                batch = db.query(Batch).filter(Batch.id == pick["batch_id"]).first()
+                cases = pick["cases_to_pick"]
+                batch.cases_remaining -= cases
+                update_inventory(item.sku_id, pick["warehouse"], -cases, db, company_id, "unrestricted")
+                update_monthly_consumption(item.sku_id, today.year, today.month, 0, db, company_id)
+                mc = db.query(MonthlyConsumption).filter(
+                    MonthlyConsumption.sku_id == item.sku_id,
+                    MonthlyConsumption.year == today.year,
+                    MonthlyConsumption.month == today.month,
+                    MonthlyConsumption.company_id == company_id,
+                ).first()
+                if mc:
+                    mc.cases_dispatched += cases
+                db.add(DispatchItem(
+                    order_item_id=item.id,
+                    batch_id=pick["batch_id"],
+                    warehouse=pick["warehouse"],
+                    cases_picked=cases,
+                ))
+                fulfilled += cases
 
         item.cases_fulfilled = fulfilled
         dispatched_items.append({
@@ -418,8 +466,14 @@ def send_to_picking(
     req: PickingAssignRequest = None,
     db: Session = Depends(get_db),
     company_id: int = Depends(get_company_id),
+    current_user=Depends(get_current_user),
 ):
-    """Admin explicitly queues this order for mobile picking."""
+    """
+    Queue order for picking.
+    Creates one WarehouseTask per batch pick (FEFO-locked) and moves
+    the quantity from 'unrestricted' to 'allocated' so it can't be
+    double-sold to another order.
+    """
     if req is None:
         req = PickingAssignRequest()
     order = db.query(Order).filter(Order.id == order_id, Order.company_id == company_id).first()
@@ -427,11 +481,52 @@ def send_to_picking(
         raise HTTPException(status_code=404, detail="Order not found")
     if order.status != "Pending":
         raise HTTPException(status_code=400, detail="Only Pending orders can be queued for picking")
+
+    # Cancel any existing pending tasks for this order (re-queue scenario)
+    existing = db.query(WarehouseTask).filter(
+        WarehouseTask.order_id == order_id,
+        WarehouseTask.status == "pending",
+        WarehouseTask.task_type == "pick",
+    ).all()
+    for t in existing:
+        # Release previously allocated stock back to unrestricted
+        update_inventory(t.sku_id, t.warehouse, t.quantity, db, company_id, "unrestricted")
+        update_inventory(t.sku_id, t.warehouse, -t.quantity, db, company_id, "allocated")
+        t.status = "cancelled"
+
+    # Build FEFO pick tasks for each order item
+    tasks_created = 0
+    for item in order.items:
+        picks, _ = build_pick_list(item.sku_id, item.cases_requested, db, company_id)
+        for pick in picks:
+            task = WarehouseTask(
+                company_id=company_id,
+                task_type="pick",
+                status="pending",
+                sku_id=item.sku_id,
+                batch_id=pick["batch_id"],        # FEFO-locked batch
+                warehouse=pick["warehouse"],
+                quantity=pick["cases_to_pick"],
+                order_id=order_id,
+                order_item_id=item.id,
+                created_by=current_user.id,
+                notes=f"Order {order.order_number}",
+            )
+            db.add(task)
+            # Lock the stock: unrestricted → allocated
+            update_inventory(item.sku_id, pick["warehouse"], -pick["cases_to_pick"], db, company_id, "unrestricted")
+            update_inventory(item.sku_id, pick["warehouse"],  pick["cases_to_pick"], db, company_id, "allocated")
+            tasks_created += 1
+
     order.picking_queued = True
     if req.picker_name:
         order.picker_name = req.picker_name
     db.commit()
-    return {"message": "Order queued for picking", "picker_name": order.picker_name}
+    return {
+        "message": "Order queued for picking",
+        "picker_name": order.picker_name,
+        "tasks_created": tasks_created,
+    }
 
 
 @router.post("/{order_id}/start-picking")

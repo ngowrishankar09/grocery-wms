@@ -8,7 +8,7 @@ import {
   Warehouse, ArrowLeftRight, TrendingUp, Users, Globe, Settings, SendHorizonal,
   Bell, FileText, ClipboardList, X, AlertTriangle, Clock, Archive, ChevronRight,
   LayoutGrid, Table2, BookOpen, MapPin, ShoppingBag, Smartphone, Menu, Store,
-  RotateCcw, Receipt, UserCircle2, LogOut, Shield, Tags, ChevronDown
+  RotateCcw, Receipt, UserCircle2, LogOut, Shield, Tags, ChevronDown, CheckSquare
 } from 'lucide-react'
 
 const navGroups = (t) => [
@@ -23,7 +23,8 @@ const navGroups = (t) => [
       { to: '/drivers',        icon: UserCircle2,     label: 'Drivers' },
       { to: '/orders',         icon: ShoppingCart,    label: t('orders') },
       { to: '/transfers',      icon: ArrowLeftRight,  label: t('transfers') },
-      { to: '/picking',        icon: Smartphone,      label: 'Mobile Picking' },
+      { to: '/picking',          icon: Smartphone,      label: 'Mobile Picking' },
+      { to: '/warehouse-tasks',  icon: CheckSquare,     label: 'Warehouse Tasks' },
     ],
   },
   {

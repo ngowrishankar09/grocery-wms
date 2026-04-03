@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
-import { inventoryAPI, skuAPI, uploadAPI, receivingAPI } from '../api/client'
+import { inventoryAPI, skuAPI, uploadAPI, receivingAPI, warehouseTaskAPI } from '../api/client'
 import { useT } from '../i18n/translations'
-import { Search, Filter, MapPin, X, Check, Camera, Layers, Package } from 'lucide-react'
+import { Search, Filter, MapPin, X, Check, Camera, Layers, Package, Lock, Unlock, AlertTriangle } from 'lucide-react'
 import axios from 'axios'
 import BarcodeScanner from '../components/BarcodeScanner'
 
@@ -130,6 +130,10 @@ export default function Inventory({ lang }) {
   const [categories, setCategories] = useState([])
   const [showScanner, setShowScanner] = useState(false)
   const [scanFeedback, setScanFeedback] = useState(null)
+  const [stockModal, setStockModal] = useState(null)  // { mode:'block'|'release', item, warehouse }
+  const [stockQty, setStockQty] = useState(1)
+  const [stockReason, setStockReason] = useState('')
+  const [stockSaving, setStockSaving] = useState(false)
 
   const load = () => {
     if (!items.length) setLoading(true)
@@ -177,6 +181,31 @@ export default function Inventory({ lang }) {
     setShowScanner(false)
   }
 
+  const openBlockModal = (item, wh) => {
+    setStockModal({ mode: 'block', item, warehouse: wh })
+    setStockQty(1)
+    setStockReason('')
+  }
+  const openReleaseModal = (item, wh) => {
+    setStockModal({ mode: 'release', item, warehouse: wh })
+    setStockQty(1)
+    setStockReason('')
+  }
+  const handleStockAction = async () => {
+    if (!stockModal) return
+    setStockSaving(true)
+    try {
+      const payload = { sku_id: stockModal.item.sku_id, warehouse: stockModal.warehouse, quantity: Number(stockQty), reason: stockReason || undefined }
+      if (stockModal.mode === 'block') await warehouseTaskAPI.blockStock(payload)
+      else await warehouseTaskAPI.releaseStock(payload)
+      setStockModal(null)
+      load()
+    } catch (e) {
+      alert(e?.response?.data?.detail || 'Error')
+    }
+    setStockSaving(false)
+  }
+
   const filteredBatches = batches.filter(b =>
     !batchSearch ||
     b.product_name.toLowerCase().includes(batchSearch.toLowerCase()) ||
@@ -188,6 +217,54 @@ export default function Inventory({ lang }) {
   return (
     <div className="space-y-6">
       {showScanner && <BarcodeScanner onScan={handleScan} onClose={() => setShowScanner(false)} />}
+
+      {/* Block / Release Stock Modal */}
+      {stockModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
+            <div className={`flex items-center gap-2 mb-4 ${stockModal.mode === 'block' ? 'text-red-600' : 'text-emerald-600'}`}>
+              {stockModal.mode === 'block' ? <Lock size={18} /> : <Unlock size={18} />}
+              <h3 className="text-base font-bold">
+                {stockModal.mode === 'block' ? 'Block Stock (Quarantine)' : 'Release Blocked Stock'}
+              </h3>
+            </div>
+            <p className="text-sm text-gray-500 mb-4">
+              <strong>{stockModal.item.product_name}</strong> · {stockModal.warehouse}
+              {stockModal.mode === 'block'
+                ? <span className="block text-xs mt-1 text-gray-400">Moving from <b>unrestricted → blocked</b>. Blocked stock cannot be ordered.</span>
+                : <span className="block text-xs mt-1 text-gray-400">Moving from <b>blocked → unrestricted</b>. Stock becomes available for orders.</span>
+              }
+            </p>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Quantity (cases)</label>
+            <input
+              type="number" min={1}
+              value={stockQty}
+              onChange={e => setStockQty(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-blue-400"
+            />
+            <label className="block text-xs font-medium text-gray-600 mb-1">Reason (optional)</label>
+            <input
+              type="text"
+              value={stockReason}
+              onChange={e => setStockReason(e.target.value)}
+              placeholder={stockModal.mode === 'block' ? 'e.g. Damaged, recall, QC hold' : 'e.g. QC passed, cleared for sale'}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-blue-400"
+            />
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setStockModal(null)} className="px-4 py-2 rounded-lg text-sm text-gray-600 hover:bg-gray-100">Cancel</button>
+              <button
+                onClick={handleStockAction}
+                disabled={stockSaving || !stockQty}
+                className={`px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors ${
+                  stockModal.mode === 'block' ? 'bg-red-500 hover:bg-red-600' : 'bg-emerald-500 hover:bg-emerald-600'
+                } disabled:opacity-50`}
+              >
+                {stockSaving ? 'Saving…' : stockModal.mode === 'block' ? 'Block Stock' : 'Release Stock'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
         <h2 className="text-2xl font-bold text-gray-900">{t('inventory')}</h2>
@@ -381,6 +458,7 @@ export default function Inventory({ lang }) {
                 <th className="table-th hidden sm:table-cell">Bin (WH1)</th>
                 <th className="table-th hidden md:table-cell">Earliest Expiry</th>
                 <th className="table-th hidden md:table-cell">Vendor</th>
+                <th className="table-th hidden lg:table-cell">Stock Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -433,6 +511,37 @@ export default function Inventory({ lang }) {
                     )}
                   </td>
                   <td className="table-td hidden md:table-cell text-gray-500 text-xs">{item.vendor_name || '—'}</td>
+                  <td className="table-td hidden lg:table-cell">
+                    <div className="flex flex-col gap-1">
+                      {item.wh1_cases > 0 && (
+                        <div className="flex gap-1">
+                          <span className="text-xs text-gray-400">WH1:</span>
+                          <button onClick={() => openBlockModal(item, 'WH1')}
+                            className="text-xs px-1.5 py-0.5 rounded bg-red-50 text-red-600 hover:bg-red-100 flex items-center gap-0.5 transition-colors">
+                            <Lock size={9} /> Block
+                          </button>
+                        </div>
+                      )}
+                      {item.wh2_cases > 0 && (
+                        <div className="flex gap-1">
+                          <span className="text-xs text-gray-400">WH2:</span>
+                          <button onClick={() => openBlockModal(item, 'WH2')}
+                            className="text-xs px-1.5 py-0.5 rounded bg-red-50 text-red-600 hover:bg-red-100 flex items-center gap-0.5 transition-colors">
+                            <Lock size={9} /> Block
+                          </button>
+                        </div>
+                      )}
+                      {(item.wh1_blocked > 0 || item.wh2_blocked > 0) && (
+                        <div className="flex gap-1">
+                          <span className="text-xs text-amber-600">Blocked: {(item.wh1_blocked||0)+(item.wh2_blocked||0)}</span>
+                          <button onClick={() => openReleaseModal(item, item.wh1_blocked > 0 ? 'WH1' : 'WH2')}
+                            className="text-xs px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 hover:bg-emerald-100 flex items-center gap-0.5 transition-colors">
+                            <Unlock size={9} /> Release
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>

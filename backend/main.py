@@ -5,7 +5,7 @@ from sqlalchemy import text
 import os, pathlib
 
 from database import engine, SessionLocal
-from models import create_tables, Warehouse, User, Company, CompanyProfile
+from models import create_tables, Warehouse, User, Company, CompanyProfile, WarehouseTask
 from routers import skus, vendors, receiving, orders, inventory, transfers, forecasting, dashboard, upload, settings, dispatch
 from routers import reports, stock_take, notifications, dispatch_board, spreadsheet, quickbooks, bin_locations, purchase_orders, labels, customers, returns, invoices
 from routers.drivers import router as drivers_router, runs_router
@@ -15,6 +15,7 @@ from routers.superadmin import router as superadmin_router
 from routers.price_lists import router as price_lists_router
 from routers.email import router as email_router
 from routers.portal import router as portal_router
+from routers.warehouse_tasks import router as warehouse_tasks_router
 from security import hash_password, verify_password
 
 create_tables(engine)
@@ -93,6 +94,8 @@ def _migrate():
         ("quickbooks_config",       "company_id", "INTEGER"),
         # Company approval workflow
         ("companies", "status", "VARCHAR DEFAULT 'active'"),
+        # Stock type tracking
+        ("inventory", "stock_type", "VARCHAR DEFAULT 'unrestricted'"),
     ]
     with engine.connect() as conn:
         for table, col, type_def in migrations:
@@ -255,6 +258,7 @@ app.include_router(price_lists_router)
 app.include_router(email_router)
 app.include_router(portal_router)
 app.include_router(superadmin_router)
+app.include_router(warehouse_tasks_router)
 
 # ── Static files (product images) ─────────────────────────────
 _static_dir = pathlib.Path(__file__).parent / "static" / "products"
