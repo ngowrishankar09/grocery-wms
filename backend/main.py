@@ -96,6 +96,10 @@ def _migrate():
         ("companies", "status", "VARCHAR DEFAULT 'active'"),
         # Stock type tracking
         ("inventory", "stock_type", "VARCHAR DEFAULT 'unrestricted'"),
+        # Customer credit management
+        ("customers", "credit_limit",  "FLOAT"),
+        ("customers", "credit_hold",   "BOOLEAN DEFAULT 0"),
+        ("customers", "payment_terms", "VARCHAR"),
     ]
     with engine.connect() as conn:
         for table, col, type_def in migrations:

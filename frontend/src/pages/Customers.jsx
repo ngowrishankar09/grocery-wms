@@ -3,8 +3,10 @@ import { customerAPI, portalAPI } from '../api/client'
 import {
   Plus, Search, Pencil, Trash2, X, ChevronRight,
   Phone, Mail, MapPin, User, ShoppingCart, ChevronDown, ChevronUp,
-  Globe, KeyRound, CheckCircle
+  Globe, KeyRound, CheckCircle, AlertTriangle, Lock, DollarSign
 } from 'lucide-react'
+
+const fmtMoney = (n) => n != null ? `$${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'
 
 // ── Portal Access Modal ────────────────────────────────────────
 function PortalAccessModal({ customer, onClose, onSaved }) {
@@ -120,10 +122,15 @@ function PortalAccessModal({ customer, onClose, onSaved }) {
 const BLANK = {
   name: '', contact_person: '', phone: '', email: '',
   address: '', delivery_address: '', notes: '', is_active: true,
+  credit_limit: '', payment_terms: '', credit_hold: false,
 }
 
 function CustomerModal({ customer, onClose, onSaved }) {
-  const [form, setForm] = useState(customer ? { ...customer } : { ...BLANK })
+  const [form, setForm] = useState(customer ? {
+    ...BLANK, ...customer,
+    credit_limit: customer.credit_limit ?? '',
+    payment_terms: customer.payment_terms ?? '',
+  } : { ...BLANK })
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState('')
 
@@ -235,6 +242,50 @@ function CustomerModal({ customer, onClose, onSaved }) {
               onChange={e => set('notes', e.target.value)}
               placeholder="Delivery preferences, special instructions…"
             />
+          </div>
+
+          {/* Credit management */}
+          <div className="border-t pt-4">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Credit Settings</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Credit Limit ($)</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="100"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  value={form.credit_limit}
+                  onChange={e => set('credit_limit', e.target.value === '' ? null : parseFloat(e.target.value))}
+                  placeholder="Unlimited"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Default Payment Terms</label>
+                <select
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  value={form.payment_terms || ''}
+                  onChange={e => set('payment_terms', e.target.value || null)}
+                >
+                  <option value="">None</option>
+                  <option>Due on Receipt</option>
+                  <option>Net 7</option>
+                  <option>Net 14</option>
+                  <option>Net 30</option>
+                  <option>Net 45</option>
+                  <option>Net 60</option>
+                </select>
+              </div>
+            </div>
+            <label className="flex items-center gap-2 text-sm text-red-700 cursor-pointer mt-3">
+              <input
+                type="checkbox"
+                checked={form.credit_hold || false}
+                onChange={e => set('credit_hold', e.target.checked)}
+                className="rounded accent-red-600"
+              />
+              <Lock size={13} className="text-red-500" /> Credit hold — block all new order dispatches
+            </label>
           </div>
 
           <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
@@ -417,7 +468,8 @@ export default function Customers() {
                 <tr>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Customer</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Contact</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Address</th>
+                  <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Outstanding</th>
+                  <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Limit</th>
                   <th className="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Orders</th>
                   <th className="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Status</th>
                   <th className="px-4 py-3" />
@@ -425,10 +477,17 @@ export default function Customers() {
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {filtered.map(c => (
-                  <tr key={c.id} className="hover:bg-gray-50 transition-colors">
+                  <tr key={c.id} className={`hover:bg-gray-50 transition-colors ${c.credit_hold ? 'bg-red-50/30' : ''}`}>
                     <td className="px-4 py-3">
-                      <p className="font-semibold text-gray-900">{c.name}</p>
-                      {c.notes && <p className="text-xs text-gray-400 mt-0.5 truncate max-w-[180px]">{c.notes}</p>}
+                      <div className="flex items-center gap-1.5">
+                        <p className="font-semibold text-gray-900">{c.name}</p>
+                        {c.credit_hold && (
+                          <span className="inline-flex items-center gap-0.5 text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded-full font-semibold">
+                            <Lock size={9} /> Hold
+                          </span>
+                        )}
+                      </div>
+                      {c.payment_terms && <p className="text-xs text-gray-400 mt-0.5">{c.payment_terms}</p>}
                     </td>
                     <td className="px-4 py-3 text-gray-600">
                       {c.contact_person && (
@@ -447,14 +506,20 @@ export default function Customers() {
                         </div>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-xs text-gray-500 max-w-[160px]">
-                      {c.delivery_address || c.address
-                        ? <div className="flex items-start gap-1.5">
-                            <MapPin size={11} className="text-gray-400 mt-0.5 flex-shrink-0" />
-                            <span className="line-clamp-2">{c.delivery_address || c.address}</span>
-                          </div>
-                        : <span className="text-gray-300">—</span>
-                      }
+                    <td className="px-4 py-3 text-right">
+                      {c.outstanding_balance > 0 ? (
+                        <span className={`text-xs font-semibold ${
+                          c.credit_limit && c.outstanding_balance >= c.credit_limit
+                            ? 'text-red-600' : 'text-orange-600'
+                        }`}>
+                          {fmtMoney(c.outstanding_balance)}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-gray-300">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-right text-xs text-gray-500">
+                      {c.credit_limit ? fmtMoney(c.credit_limit) : <span className="text-gray-300">Unlimited</span>}
                     </td>
                     <td className="px-4 py-3 text-center">
                       <button
@@ -474,6 +539,13 @@ export default function Customers() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-1">
+                        <button
+                          onClick={async () => { await customerAPI.toggleHold(c.id); load() }}
+                          className={`p-1.5 rounded-lg ${c.credit_hold ? 'text-red-600 bg-red-50 hover:bg-red-100' : 'text-gray-400 hover:bg-red-50 hover:text-red-600'}`}
+                          title={c.credit_hold ? 'Remove credit hold' : 'Place on credit hold'}
+                        >
+                          <Lock size={14} />
+                        </button>
                         <button
                           onClick={() => setPortalModal(c)}
                           className={`p-1.5 rounded-lg hover:bg-indigo-50 ${c.portal_enabled ? 'text-indigo-600' : 'text-gray-400 hover:text-indigo-600'}`}

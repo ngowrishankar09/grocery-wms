@@ -225,6 +225,10 @@ class Customer(Base):
     # Portal access
     portal_enabled   = Column(Boolean, default=False)
     portal_password  = Column(String, nullable=True)  # hashed
+    # Credit management
+    credit_limit     = Column(Float, nullable=True)     # max outstanding balance; None = unlimited
+    credit_hold      = Column(Boolean, default=False)   # hard block on new orders
+    payment_terms    = Column(String, nullable=True)    # default e.g. "Net 30"
 
     orders           = relationship("Order", back_populates="customer")
     price_list       = relationship("PriceList", back_populates="customers")

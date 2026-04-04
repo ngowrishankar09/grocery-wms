@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional, List
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import sys, os
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
@@ -224,7 +224,135 @@ def _save_taxes(db, inv_id, taxes_in):
     return taxes_in  # caller adds rows after _calc
 
 
+# ── Helper: create invoice from order (used by dispatch too) ──
+
+def _create_invoice_for_order(order, db: Session, company_id: int) -> "Invoice":
+    """
+    Auto-generate a Draft invoice for a dispatched order.
+    Returns the new Invoice or raises if one already exists.
+    """
+    existing = db.query(Invoice).filter(
+        Invoice.order_id == order.id,
+        Invoice.company_id == company_id,
+    ).first()
+    if existing:
+        return existing
+
+    inv = Invoice(
+        invoice_number=_next_invoice_number(db, company_id),
+        order_id=order.id,
+        customer_id=order.customer_id,
+        store_name=order.store_name,
+        invoice_date=order.dispatch_date or date.today(),
+        status="Draft",
+        notes=order.notes,
+        num_pallets=order.num_pallets,
+        tax_rate=0.0,
+        discount_amount=0.0,
+        previous_balance=0.0,
+        company_id=company_id,
+    )
+    # Apply default payment terms from customer if set
+    if order.customer_id and order.customer:
+        pt = getattr(order.customer, "payment_terms", None)
+        if pt:
+            inv.payment_terms = pt
+            # Calculate due date
+            try:
+                days = int(''.join(filter(str.isdigit, pt)))
+                inv.due_date = date.today() + timedelta(days=days)
+            except Exception:
+                pass
+
+    db.add(inv)
+    db.flush()
+
+    subtotal = 0.0
+    for oi in order.items:
+        qty = oi.cases_fulfilled or oi.cases_requested
+        if qty <= 0:
+            continue
+        if oi.unit_price is not None:
+            unit_price = oi.unit_price
+        elif oi.sku and oi.sku.selling_price is not None:
+            unit_price = oi.sku.selling_price
+        else:
+            unit_price = 0.0
+        line_total = round(qty * unit_price, 2)
+        subtotal += line_total
+        desc = oi.sku.product_name if oi.sku else f"SKU {oi.sku_id}"
+        expiry = getattr(oi, "expiry_date_entered", None)
+        db.add(InvoiceItem(
+            invoice_id=inv.id, sku_id=oi.sku_id,
+            description=desc, cases_qty=qty,
+            unit_price=unit_price, line_total=line_total,
+            expiry_date=expiry, notes=oi.notes,
+        ))
+
+    inv.subtotal   = round(subtotal, 2)
+    inv.tax_amount = 0.0
+    inv.total      = inv.subtotal
+    inv.grand_total = inv.subtotal
+    db.commit()
+    db.refresh(inv)
+    return inv
+
+
 # ── Endpoints ─────────────────────────────────────────────────
+
+@router.get("/aging-summary")
+def aging_summary(
+    db: Session = Depends(get_db),
+    company_id: int = Depends(get_company_id),
+):
+    """Aged receivables totals bucketed by days overdue (all companies Sent/Overdue invoices)."""
+    today = date.today()
+    invs = db.query(Invoice).filter(
+        Invoice.company_id == company_id,
+        Invoice.status.in_(["Sent", "Overdue"]),
+    ).all()
+
+    amounts = {"current": 0.0, "days_1_30": 0.0, "days_31_60": 0.0, "days_61_90": 0.0, "over_90": 0.0, "total": 0.0}
+    counts  = {"current": 0,   "days_1_30": 0,   "days_31_60": 0,   "days_61_90": 0,   "over_90": 0}
+
+    for inv in invs:
+        amt = float(inv.grand_total or inv.total or 0)
+        amounts["total"] = round(amounts["total"] + amt, 2)
+
+        if inv.due_date and inv.due_date < today:
+            days = (today - inv.due_date).days
+            if days <= 30:
+                amounts["days_1_30"]  = round(amounts["days_1_30"]  + amt, 2); counts["days_1_30"]  += 1
+            elif days <= 60:
+                amounts["days_31_60"] = round(amounts["days_31_60"] + amt, 2); counts["days_31_60"] += 1
+            elif days <= 90:
+                amounts["days_61_90"] = round(amounts["days_61_90"] + amt, 2); counts["days_61_90"] += 1
+            else:
+                amounts["over_90"]    = round(amounts["over_90"]    + amt, 2); counts["over_90"]    += 1
+        else:
+            amounts["current"] = round(amounts["current"] + amt, 2); counts["current"] += 1
+
+    return {"amounts": amounts, "counts": counts}
+
+
+@router.post("/mark-overdue-batch")
+def mark_overdue_batch(
+    db: Session = Depends(get_db),
+    company_id: int = Depends(get_company_id),
+):
+    """Mark all Sent invoices with a past due date as Overdue."""
+    today = date.today()
+    invs = db.query(Invoice).filter(
+        Invoice.company_id == company_id,
+        Invoice.status == "Sent",
+        Invoice.due_date < today,
+        Invoice.due_date.isnot(None),
+    ).all()
+    for inv in invs:
+        inv.status = "Overdue"
+    db.commit()
+    return {"updated": len(invs)}
+
 
 @router.get("/")
 def list_invoices(

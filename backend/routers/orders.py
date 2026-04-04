@@ -7,9 +7,11 @@ from datetime import date, datetime
 import sys, os
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from database import get_db
+from sqlalchemy import func
 from models import (
     Order, OrderItem, DispatchItem, Batch,
-    Inventory, SKU, MonthlyConsumption, BinLocation, WarehouseTask
+    Inventory, SKU, MonthlyConsumption, BinLocation, WarehouseTask,
+    Customer, Invoice as InvoiceModel, InvoiceItem as InvoiceItemModel, CompanyProfile,
 )
 from routers.receiving import update_inventory, update_monthly_consumption
 from security import get_current_user, get_company_id
@@ -262,6 +264,30 @@ def dispatch_order(
     if order.status == "Dispatched":
         raise HTTPException(status_code=400, detail="Order already dispatched")
 
+    # ── Credit check ──────────────────────────────────────────
+    if order.customer_id:
+        cust = db.query(Customer).filter(
+            Customer.id == order.customer_id,
+            Customer.company_id == company_id,
+        ).first()
+        if cust:
+            if getattr(cust, "credit_hold", False):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Order blocked: {cust.name} is on credit hold. Remove the hold in Customers before dispatching.",
+                )
+            if getattr(cust, "credit_limit", None) is not None:
+                outstanding = db.query(func.sum(InvoiceModel.grand_total)).filter(
+                    InvoiceModel.customer_id == cust.id,
+                    InvoiceModel.company_id == company_id,
+                    InvoiceModel.status.in_(["Sent", "Overdue"]),
+                ).scalar() or 0.0
+                if float(outstanding) >= cust.credit_limit:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Order blocked: {cust.name} has reached their credit limit of ${cust.credit_limit:,.2f} (outstanding: ${outstanding:,.2f}).",
+                    )
+
     today = date.today()
     dispatched_items = []
 
@@ -349,7 +375,38 @@ def dispatch_order(
         order.packing_status = "Done"
     db.commit()
 
-    return {"message": "Order dispatched", "items": dispatched_items}
+    # ── Auto-create invoice ───────────────────────────────────
+    auto_invoice = None
+    try:
+        from routers.invoices import _create_invoice_for_order
+        auto_invoice = _create_invoice_for_order(order, db, company_id)
+
+        # ── Auto-email if customer has email + SMTP configured ─
+        if auto_invoice and order.customer_id:
+            try:
+                cp = db.query(CompanyProfile).filter(
+                    CompanyProfile.company_id == company_id,
+                ).first()
+                if not cp:
+                    cp = db.query(CompanyProfile).filter(CompanyProfile.id == 1).first()
+                cust_email = order.customer.email if order.customer else None
+                if cust_email and cp and cp.smtp_host and cp.smtp_user and cp.smtp_password:
+                    from routers.email import _invoice_html, _send_email
+                    subject = f"Invoice {auto_invoice.invoice_number} from {cp.name or 'Us'}"
+                    html = _invoice_html(auto_invoice, cp)
+                    _send_email(cp, cust_email, subject, html)
+                    auto_invoice.status = "Sent"
+                    db.commit()
+            except Exception:
+                pass  # email failure doesn't break dispatch
+    except Exception:
+        pass  # invoice failure doesn't break dispatch
+
+    result = {"message": "Order dispatched", "items": dispatched_items}
+    if auto_invoice:
+        result["invoice_number"] = auto_invoice.invoice_number
+        result["invoice_id"]     = auto_invoice.id
+    return result
 
 @router.get("/{order_id}")
 def get_order(

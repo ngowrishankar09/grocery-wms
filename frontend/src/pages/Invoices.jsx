@@ -4,7 +4,7 @@ import { printInvoice } from '../utils/invoiceTemplates'
 import {
   FileText, Plus, Printer, Send, CheckCircle, Trash2,
   ChevronDown, ChevronUp, X, Search, RefreshCw,
-  Edit2, AlertCircle, DollarSign, Mail
+  Edit2, AlertCircle, DollarSign, Mail, Clock, AlertTriangle
 } from 'lucide-react'
 
 // ── Status badge ─────────────────────────────────────────────
@@ -447,6 +447,76 @@ function FromOrderModal({ onClose, onCreated }) {
   )
 }
 
+// ── Aging Summary Panel ───────────────────────────────────────
+function AgingPanel({ onMarkOverdue }) {
+  const [aging,    setAging]    = useState(null)
+  const [marking,  setMarking]  = useState(false)
+  const [show,     setShow]     = useState(false)
+
+  useEffect(() => {
+    invoiceAPI.agingSummary().then(r => setAging(r.data)).catch(() => {})
+  }, [])
+
+  const handleMarkOverdue = async () => {
+    if (!window.confirm('Mark all Sent invoices with a past due date as Overdue?')) return
+    setMarking(true)
+    try {
+      const r = await invoiceAPI.markOverdueBatch()
+      alert(`${r.data.updated} invoice(s) marked Overdue.`)
+      onMarkOverdue()
+      const r2 = await invoiceAPI.agingSummary()
+      setAging(r2.data)
+    } catch (e) {
+      alert(e?.response?.data?.detail || 'Failed')
+    } finally { setMarking(false) }
+  }
+
+  if (!aging) return null
+  const { amounts, counts } = aging
+  if (amounts.total === 0) return null
+
+  const buckets = [
+    { label: 'Current',  amt: amounts.current,    cnt: counts.current,    color: 'text-blue-700',   bg: 'bg-blue-50'   },
+    { label: '1-30 days', amt: amounts.days_1_30, cnt: counts.days_1_30,  color: 'text-amber-700',  bg: 'bg-amber-50'  },
+    { label: '31-60',    amt: amounts.days_31_60,  cnt: counts.days_31_60, color: 'text-orange-700', bg: 'bg-orange-50' },
+    { label: '61-90',    amt: amounts.days_61_90,  cnt: counts.days_61_90, color: 'text-red-600',    bg: 'bg-red-50'    },
+    { label: '90+ days', amt: amounts.over_90,     cnt: counts.over_90,    color: 'text-red-800',    bg: 'bg-red-100'   },
+  ]
+  const hasOverdue = (amounts.days_1_30 + amounts.days_31_60 + amounts.days_61_90 + amounts.over_90) > 0
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 p-4">
+      <div className="flex items-center justify-between mb-3">
+        <button onClick={() => setShow(s => !s)} className="flex items-center gap-2 text-sm font-semibold text-gray-700 hover:text-gray-900">
+          <Clock size={15} className="text-blue-600" />
+          Aged Receivables — <span className="text-blue-700">{fmt(amounts.total)}</span> outstanding
+          {show ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+        </button>
+        {hasOverdue && (
+          <button
+            onClick={handleMarkOverdue}
+            disabled={marking}
+            className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-red-50 text-red-700 border border-red-200 rounded-lg hover:bg-red-100 disabled:opacity-50"
+          >
+            <AlertTriangle size={12} /> {marking ? 'Updating…' : 'Mark Overdue'}
+          </button>
+        )}
+      </div>
+      {show && (
+        <div className="grid grid-cols-5 gap-2">
+          {buckets.map(b => (
+            <div key={b.label} className={`${b.bg} rounded-lg p-3 text-center`}>
+              <p className={`text-sm font-bold ${b.color}`}>{fmt(b.amt)}</p>
+              <p className="text-xs text-gray-500 mt-0.5">{b.label}</p>
+              <p className="text-xs text-gray-400">{b.cnt} inv.</p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Main Invoices Page ────────────────────────────────────────
 export default function Invoices() {
   const [invoices,      setInvoices]     = useState([])
@@ -538,6 +608,9 @@ export default function Invoices() {
           </button>
         </div>
       </div>
+
+      {/* Aging panel */}
+      <AgingPanel onMarkOverdue={load} />
 
       {/* Summary chips */}
       <div className="grid grid-cols-2 sm:grid-cols-6 gap-3">

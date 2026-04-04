@@ -162,12 +162,14 @@ export const uploadAPI = {
 }
 
 export const customerAPI = {
-  list:   (params)    => api.get('/customers/', { params }),
-  create: (data)      => api.post('/customers/', data),
-  update: (id, data)  => api.put(`/customers/${id}`, data),
-  get:    (id)        => api.get(`/customers/${id}`),
-  orders: (id)        => api.get(`/customers/${id}/orders`),
-  delete: (id)        => api.delete(`/customers/${id}`),
+  list:       (params)   => api.get('/customers/', { params }),
+  create:     (data)     => api.post('/customers/', data),
+  update:     (id, data) => api.put(`/customers/${id}`, data),
+  get:        (id)       => api.get(`/customers/${id}`),
+  orders:     (id)       => api.get(`/customers/${id}/orders`),
+  delete:     (id)       => api.delete(`/customers/${id}`),
+  aging:      ()         => api.get('/customers/aging'),
+  toggleHold: (id)       => api.post(`/customers/${id}/toggle-hold`),
 }
 
 export const returnsAPI = {
@@ -180,15 +182,17 @@ export const returnsAPI = {
 }
 
 export const invoiceAPI = {
-  list:        (params)   => api.get('/invoices/', { params }),
-  create:      (data)     => api.post('/invoices/', data),
-  get:         (id)       => api.get(`/invoices/${id}`),
-  update:      (id, data) => api.put(`/invoices/${id}`, data),
-  delete:      (id)       => api.delete(`/invoices/${id}`),
-  fromOrder:   (orderId)  => api.post(`/invoices/from-order/${orderId}`),
-  send:        (id)       => api.post(`/invoices/${id}/send`),
-  markPaid:    (id)       => api.post(`/invoices/${id}/mark-paid`),
-  markOverdue: (id)       => api.post(`/invoices/${id}/mark-overdue`),
+  list:             (params)   => api.get('/invoices/', { params }),
+  create:           (data)     => api.post('/invoices/', data),
+  get:              (id)       => api.get(`/invoices/${id}`),
+  update:           (id, data) => api.put(`/invoices/${id}`, data),
+  delete:           (id)       => api.delete(`/invoices/${id}`),
+  fromOrder:        (orderId)  => api.post(`/invoices/from-order/${orderId}`),
+  send:             (id)       => api.post(`/invoices/${id}/send`),
+  markPaid:         (id)       => api.post(`/invoices/${id}/mark-paid`),
+  markOverdue:      (id)       => api.post(`/invoices/${id}/mark-overdue`),
+  agingSummary:     ()         => api.get('/invoices/aging-summary'),
+  markOverdueBatch: ()         => api.post('/invoices/mark-overdue-batch'),
 }
 
 export const purchaseOrderAPI = {
