@@ -8,7 +8,7 @@ import {
   Warehouse, ArrowLeftRight, TrendingUp, Users, Globe, Settings, SendHorizonal,
   Bell, FileText, ClipboardList, X, AlertTriangle, Clock, Archive, ChevronRight,
   LayoutGrid, Table2, BookOpen, MapPin, ShoppingBag, Smartphone, Menu, Store,
-  RotateCcw, Receipt, UserCircle2, LogOut, Shield, Tags, ChevronDown, CheckSquare
+  RotateCcw, Receipt, UserCircle2, LogOut, Shield, Tags, ChevronDown, CheckSquare, BarChart2
 } from 'lucide-react'
 
 const navGroups = (t) => [
@@ -40,7 +40,8 @@ const navGroups = (t) => [
     items: [
       { to: '/customers',     icon: Store,    label: 'Customers' },
       { to: '/returns',       icon: RotateCcw, label: 'Returns' },
-      { to: '/invoices',      icon: Receipt,  label: 'Invoices' },
+      { to: '/invoices',      icon: Receipt,   label: 'Invoices' },
+      { to: '/finance',       icon: BarChart2, label: 'Finance' },
       { to: '/price-lists',   icon: Tags,     label: 'Price Lists' },
       { to: '/skus',          icon: Package,  label: t('skuMaster') },
       { to: '/vendors',       icon: Users,    label: t('vendors') },
@@ -215,6 +216,7 @@ const PAGE_TITLES = {
   '/users': 'Users',
   '/spreadsheet': 'Spreadsheets',
   '/quickbooks': 'QuickBooks',
+  '/finance':    'Finance',
   '/settings': 'Settings',
 }
 

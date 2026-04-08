@@ -3,8 +3,8 @@
   "configurations": [
     {
       "name": "frontend",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeExecutable": "/Users/ngs/Desktop/grocery-wms/frontend/start-dev.sh",
+      "runtimeArgs": [],
       "cwd": "/Users/ngs/Desktop/grocery-wms/frontend",
       "port": 5173
     }

@@ -23,12 +23,14 @@ from datetime import date, datetime, timedelta
 import sys, os
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from database import get_db
-from models import Invoice, InvoiceItem, InvoiceTax, Order, Customer, SKU, CompanyProfile
+from models import Invoice, InvoiceItem, InvoiceTax, InvoicePayment, JournalEntry, JournalLine, Order, Customer, SKU, CompanyProfile
 from security import get_current_user, get_company_id
 
 router = APIRouter(prefix="/invoices", tags=["Invoices"])
 
-STATUSES = ["Draft", "Sent", "Paid", "Overdue", "Cancelled"]
+STATUSES = ["Draft", "Sent", "Paid", "Partial", "Overdue", "Cancelled"]
+
+PAYMENT_METHODS = ["Cash", "Bank Transfer", "Check", "Card", "Other"]
 
 
 # ── Schemas ───────────────────────────────────────────────────
@@ -68,6 +70,13 @@ class InvoiceUpdate(BaseModel):
     previous_balance: Optional[float] = None
     items:            Optional[List[InvoiceItemIn]] = None
 
+class PaymentIn(BaseModel):
+    payment_date: date
+    amount:       float
+    method:       str = "Bank Transfer"
+    reference:    Optional[str] = None
+    notes:        Optional[str] = None
+
 
 # ── Helpers ───────────────────────────────────────────────────
 
@@ -99,7 +108,23 @@ def _fmt_item(ii: InvoiceItem):
 def _fmt_tax(tx: InvoiceTax):
     return {"id": tx.id, "name": tx.name, "rate": tx.rate, "amount": tx.amount}
 
-def _fmt(inv: Invoice):
+def _fmt_payment(p: InvoicePayment):
+    return {
+        "id":           p.id,
+        "invoice_id":   p.invoice_id,
+        "payment_date": p.payment_date.isoformat() if p.payment_date else None,
+        "amount":       p.amount,
+        "method":       p.method,
+        "reference":    p.reference,
+        "notes":        p.notes,
+        "created_at":   p.created_at.isoformat() if p.created_at else None,
+    }
+
+def _fmt(inv: Invoice, include_payments: bool = True):
+    payments = getattr(inv, "payments", []) or []
+    amount_paid = round(sum(p.amount for p in payments), 2)
+    grand_total = inv.grand_total or inv.total or 0.0
+    balance_due = round(max(grand_total - amount_paid, 0.0), 2)
     return {
         "id":               inv.id,
         "invoice_number":   inv.invoice_number,
@@ -118,12 +143,15 @@ def _fmt(inv: Invoice):
         "tax_amount":       inv.tax_amount,
         "total":            inv.total,
         "previous_balance": inv.previous_balance or 0.0,
-        "grand_total":      inv.grand_total or inv.total,
+        "grand_total":      grand_total,
+        "amount_paid":      amount_paid,
+        "balance_due":      balance_due,
         "num_pallets":      getattr(inv, "num_pallets", None),
         "item_count":       len(inv.items),
         "created_at":       inv.created_at.isoformat() if inv.created_at else None,
         "items":            [_fmt_item(i) for i in inv.items],
         "taxes":            [_fmt_tax(t) for t in inv.taxes],
+        "payments":         [_fmt_payment(p) for p in payments] if include_payments else [],
     }
 
 def _next_invoice_number(db: Session, company_id: int = 1) -> str:
@@ -636,3 +664,180 @@ def delete_invoice(
     db.delete(inv)
     db.commit()
     return {"ok": True}
+
+
+# ── Journal Entry helpers ──────────────────────────────────────
+
+def _next_je_number(db: Session, company_id: int) -> str:
+    today = date.today()
+    prefix = f"JE-{today.strftime('%Y%m%d')}"
+    count = db.query(JournalEntry).filter(
+        JournalEntry.company_id == company_id,
+        JournalEntry.entry_number.like(f"{prefix}%"),
+    ).count()
+    return f"{prefix}-{str(count + 1).zfill(3)}"
+
+
+def _create_journal_entry(db: Session, company_id: int, entry_date: date,
+                           source_type: str, source_id: int,
+                           description: str, lines: list) -> JournalEntry:
+    """Create a double-entry journal record. lines = [{'account', 'debit', 'credit', 'notes'}]"""
+    je = JournalEntry(
+        company_id   = company_id,
+        entry_date   = entry_date,
+        entry_number = _next_je_number(db, company_id),
+        source_type  = source_type,
+        source_id    = source_id,
+        description  = description,
+    )
+    db.add(je)
+    db.flush()
+    for ln in lines:
+        db.add(JournalLine(
+            entry_id = je.id,
+            account  = ln["account"],
+            debit    = ln.get("debit", 0.0),
+            credit   = ln.get("credit", 0.0),
+            notes    = ln.get("notes"),
+        ))
+    return je
+
+
+# ── Payment endpoints ──────────────────────────────────────────
+
+@router.get("/{invoice_id}/payments")
+def list_payments(
+    invoice_id: int,
+    db: Session = Depends(get_db),
+    company_id: int = Depends(get_company_id),
+):
+    inv = db.query(Invoice).filter(Invoice.id == invoice_id, Invoice.company_id == company_id).first()
+    if not inv:
+        raise HTTPException(404, "Invoice not found")
+    return [_fmt_payment(p) for p in (inv.payments or [])]
+
+
+@router.post("/{invoice_id}/payments")
+def record_payment(
+    invoice_id: int,
+    data: PaymentIn,
+    db: Session = Depends(get_db),
+    company_id: int = Depends(get_company_id),
+):
+    """QuickBooks-style Receive Payment — records amount, method, reference against invoice."""
+    inv = db.query(Invoice).filter(Invoice.id == invoice_id, Invoice.company_id == company_id).first()
+    if not inv:
+        raise HTTPException(404, "Invoice not found")
+    if inv.status in ("Cancelled",):
+        raise HTTPException(400, f"Cannot record payment on a {inv.status} invoice")
+    if data.amount <= 0:
+        raise HTTPException(400, "Payment amount must be positive")
+
+    payment = InvoicePayment(
+        company_id   = company_id,
+        invoice_id   = inv.id,
+        payment_date = data.payment_date,
+        amount       = round(data.amount, 2),
+        method       = data.method,
+        reference    = data.reference,
+        notes        = data.notes,
+    )
+    db.add(payment)
+    db.flush()
+    db.refresh(inv)
+
+    # Recalculate paid status
+    total_paid = round(sum(p.amount for p in inv.payments), 2)
+    grand_total = inv.grand_total or inv.total or 0.0
+
+    if total_paid >= grand_total:
+        inv.status = "Paid"
+    elif total_paid > 0:
+        inv.status = "Partial"
+    # else keep existing status (Sent/Overdue)
+
+    # Auto-create journal entry: DR Bank / CR Accounts Receivable
+    try:
+        _create_journal_entry(
+            db, company_id, data.payment_date,
+            source_type = "payment",
+            source_id   = payment.id,
+            description = f"Payment received — {inv.invoice_number} ({data.method})",
+            lines = [
+                {"account": "Bank / Cash",           "debit": data.amount, "credit": 0.0},
+                {"account": "Accounts Receivable",   "debit": 0.0, "credit": data.amount},
+            ],
+        )
+    except Exception:
+        pass  # Journal entry failure doesn't block payment
+
+    db.commit()
+    db.refresh(inv)
+    return _fmt(inv)
+
+
+@router.delete("/{invoice_id}/payments/{payment_id}")
+def delete_payment(
+    invoice_id:  int,
+    payment_id:  int,
+    db: Session = Depends(get_db),
+    company_id: int = Depends(get_company_id),
+):
+    inv = db.query(Invoice).filter(Invoice.id == invoice_id, Invoice.company_id == company_id).first()
+    if not inv:
+        raise HTTPException(404, "Invoice not found")
+    pmt = db.query(InvoicePayment).filter(
+        InvoicePayment.id == payment_id,
+        InvoicePayment.invoice_id == invoice_id,
+    ).first()
+    if not pmt:
+        raise HTTPException(404, "Payment not found")
+    db.delete(pmt)
+    db.flush()
+    db.refresh(inv)
+
+    # Recalculate status
+    total_paid = round(sum(p.amount for p in inv.payments), 2)
+    grand_total = inv.grand_total or inv.total or 0.0
+    if total_paid <= 0:
+        inv.status = "Sent" if inv.due_date and inv.due_date >= date.today() else "Overdue"
+    elif total_paid < grand_total:
+        inv.status = "Partial"
+    else:
+        inv.status = "Paid"
+
+    db.commit()
+    db.refresh(inv)
+    return _fmt(inv)
+
+
+# ── Journal entry endpoints ────────────────────────────────────
+
+@router.get("/journal")
+def list_journal(
+    limit: int = 50,
+    db: Session = Depends(get_db),
+    company_id: int = Depends(get_company_id),
+):
+    entries = (
+        db.query(JournalEntry)
+        .filter(JournalEntry.company_id == company_id)
+        .order_by(JournalEntry.entry_date.desc(), JournalEntry.id.desc())
+        .limit(limit)
+        .all()
+    )
+    return [
+        {
+            "id":           e.id,
+            "entry_number": e.entry_number,
+            "entry_date":   e.entry_date.isoformat() if e.entry_date else None,
+            "source_type":  e.source_type,
+            "source_id":    e.source_id,
+            "description":  e.description,
+            "lines":        [
+                {"account": l.account, "debit": l.debit, "credit": l.credit, "notes": l.notes}
+                for l in e.lines
+            ],
+        }
+        for e in entries
+    ]

@@ -193,6 +193,16 @@ export const invoiceAPI = {
   markOverdue:      (id)       => api.post(`/invoices/${id}/mark-overdue`),
   agingSummary:     ()         => api.get('/invoices/aging-summary'),
   markOverdueBatch: ()         => api.post('/invoices/mark-overdue-batch'),
+  // Payments
+  listPayments:     (id)       => api.get(`/invoices/${id}/payments`),
+  recordPayment:    (id, data) => api.post(`/invoices/${id}/payments`, data),
+  deletePayment:    (id, pid)  => api.delete(`/invoices/${id}/payments/${pid}`),
+  // Journal
+  journal:          (limit)    => api.get('/invoices/journal', { params: limit ? { limit } : {} }),
+}
+
+export const financialAPI = {
+  pl:  (months) => api.get('/reports/financials', { params: { months: months || 6 } }),
 }
 
 export const purchaseOrderAPI = {

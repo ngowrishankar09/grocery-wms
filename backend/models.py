@@ -616,8 +616,9 @@ class Invoice(Base):
 
     customer  = relationship("Customer")
     order     = relationship("Order")
-    items     = relationship("InvoiceItem", back_populates="invoice", cascade="all, delete-orphan")
-    taxes     = relationship("InvoiceTax",  back_populates="invoice", cascade="all, delete-orphan")
+    items     = relationship("InvoiceItem",   back_populates="invoice", cascade="all, delete-orphan")
+    taxes     = relationship("InvoiceTax",    back_populates="invoice", cascade="all, delete-orphan")
+    payments  = relationship("InvoicePayment",back_populates="invoice", cascade="all, delete-orphan")
 
 
 class InvoiceItem(Base):
@@ -647,6 +648,52 @@ class InvoiceTax(Base):
     amount     = Column(Float,  nullable=False, default=0.0)
 
     invoice    = relationship("Invoice", back_populates="taxes")
+
+
+# ─── Invoice Payments (QuickBooks-style Receive Payment) ─────
+class InvoicePayment(Base):
+    __tablename__ = "invoice_payments"
+
+    id           = Column(Integer, primary_key=True, index=True)
+    company_id   = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
+    invoice_id   = Column(Integer, ForeignKey("invoices.id"),  nullable=False, index=True)
+    payment_date = Column(Date,    nullable=False)
+    amount       = Column(Float,   nullable=False)
+    method       = Column(String,  default="Bank Transfer")  # Cash|Bank Transfer|Check|Card|Other
+    reference    = Column(String,  nullable=True)   # cheque #, transaction ID, etc.
+    notes        = Column(Text,    nullable=True)
+    created_at   = Column(DateTime, default=datetime.utcnow)
+
+    invoice = relationship("Invoice", back_populates="payments")
+
+
+# ─── Journal Entries (SAP-style double-entry ledger) ─────────
+class JournalEntry(Base):
+    __tablename__ = "journal_entries"
+
+    id           = Column(Integer, primary_key=True, index=True)
+    company_id   = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
+    entry_date   = Column(Date,    nullable=False)
+    entry_number = Column(String,  unique=True, index=True, nullable=False)
+    source_type  = Column(String,  nullable=True)   # invoice | payment | purchase | receiving
+    source_id    = Column(Integer, nullable=True)
+    description  = Column(Text,    nullable=True)
+    created_at   = Column(DateTime, default=datetime.utcnow)
+
+    lines = relationship("JournalLine", back_populates="entry", cascade="all, delete-orphan")
+
+
+class JournalLine(Base):
+    __tablename__ = "journal_lines"
+
+    id       = Column(Integer, primary_key=True, index=True)
+    entry_id = Column(Integer, ForeignKey("journal_entries.id"), nullable=False)
+    account  = Column(String,  nullable=False)   # "Accounts Receivable", "Sales Revenue", …
+    debit    = Column(Float,   default=0.0)
+    credit   = Column(Float,   default=0.0)
+    notes    = Column(Text,    nullable=True)
+
+    entry = relationship("JournalEntry", back_populates="lines")
 
 
 # ─── Driver / Delivery Management ────────────────────────────

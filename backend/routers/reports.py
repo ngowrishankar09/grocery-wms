@@ -25,8 +25,9 @@ from openpyxl.utils import get_column_letter
 import sys, os
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from database import get_db
-from models import SKU, Inventory, Batch, DispatchRecord, DispatchRecordItem, InventoryAdjustment
+from models import SKU, Inventory, Batch, DispatchRecord, DispatchRecordItem, InventoryAdjustment, Invoice, InvoicePayment, PurchaseOrder, Customer
 from security import get_current_user, get_company_id
+from sqlalchemy import func, extract
 
 router = APIRouter(prefix="/reports", tags=["Reports"])
 
@@ -596,3 +597,152 @@ def adjustments_export(
     _auto_width(ws)
 
     return _make_excel_response(wb, f"adjustments_{today.isoformat()}.xlsx")
+
+
+# ─── Financial / P&L Reports (QuickBooks-style) ────────────────
+
+@router.get("/financials")
+def financials(
+    months: int = 6,
+    db: Session = Depends(get_db),
+    company_id: int = Depends(get_company_id),
+):
+    """
+    P&L summary: revenue, COGS (from PO receipts), gross profit by month.
+    Also returns AR aging totals and top 5 customers by revenue.
+    """
+    today = date.today()
+    period_start = date(today.year, today.month, 1) - timedelta(days=(months - 1) * 30)
+
+    # ── Monthly Revenue (from invoices that are Paid or Partial) ──
+    inv_rows = (
+        db.query(Invoice)
+        .filter(
+            Invoice.company_id == company_id,
+            Invoice.status.in_(["Paid", "Partial", "Sent", "Overdue"]),
+            Invoice.invoice_date >= period_start,
+        )
+        .all()
+    )
+
+    # ── Monthly Payments received ──
+    pmt_rows = (
+        db.query(InvoicePayment)
+        .filter(
+            InvoicePayment.company_id == company_id,
+            InvoicePayment.payment_date >= period_start,
+        )
+        .all()
+    )
+
+    # ── Monthly COGS (from PO receiving cost) ──
+    po_rows = (
+        db.query(PurchaseOrder)
+        .filter(
+            PurchaseOrder.company_id == company_id,
+            PurchaseOrder.status.in_(["received", "partial"]),
+            PurchaseOrder.expected_date >= period_start,
+        )
+        .all()
+    )
+
+    # Build month buckets
+    def month_key(d):
+        return f"{d.year}-{str(d.month).zfill(2)}"
+
+    # Revenue billed per month
+    revenue_by_month: dict = {}
+    for inv in inv_rows:
+        k = month_key(inv.invoice_date)
+        revenue_by_month[k] = revenue_by_month.get(k, 0.0) + (inv.total or 0.0)
+
+    # Cash received per month
+    cash_by_month: dict = {}
+    for pmt in pmt_rows:
+        k = month_key(pmt.payment_date)
+        cash_by_month[k] = cash_by_month.get(k, 0.0) + pmt.amount
+
+    # COGS per month (sum of PO item unit_cost * cases_received)
+    cogs_by_month: dict = {}
+    for po in po_rows:
+        k = month_key(po.expected_date or today)
+        cogs = sum((it.unit_cost or 0) * it.cases_received for it in po.items)
+        cogs_by_month[k] = cogs_by_month.get(k, 0.0) + cogs
+
+    # Build sorted months list
+    all_months = sorted(set(
+        list(revenue_by_month.keys()) +
+        list(cash_by_month.keys()) +
+        list(cogs_by_month.keys())
+    ))
+
+    monthly = []
+    for k in all_months:
+        rev   = round(revenue_by_month.get(k, 0.0), 2)
+        cash  = round(cash_by_month.get(k, 0.0), 2)
+        cogs  = round(cogs_by_month.get(k, 0.0), 2)
+        gp    = round(rev - cogs, 2)
+        gp_pct = round((gp / rev * 100) if rev > 0 else 0.0, 1)
+        monthly.append({"month": k, "revenue": rev, "cash_received": cash,
+                         "cogs": cogs, "gross_profit": gp, "gp_pct": gp_pct})
+
+    # ── Totals ───────────────────────────────────────────────
+    total_revenue      = round(sum(m["revenue"]       for m in monthly), 2)
+    total_cash         = round(sum(m["cash_received"]  for m in monthly), 2)
+    total_cogs         = round(sum(m["cogs"]           for m in monthly), 2)
+    total_gp           = round(total_revenue - total_cogs, 2)
+    total_gp_pct       = round((total_gp / total_revenue * 100) if total_revenue > 0 else 0.0, 1)
+
+    # ── AR outstanding ───────────────────────────────────────
+    outstanding = (
+        db.query(func.sum(Invoice.grand_total))
+        .filter(Invoice.company_id == company_id, Invoice.status.in_(["Sent", "Overdue", "Partial"]))
+        .scalar() or 0.0
+    )
+    overdue = (
+        db.query(func.sum(Invoice.grand_total))
+        .filter(Invoice.company_id == company_id, Invoice.status == "Overdue")
+        .scalar() or 0.0
+    )
+
+    # ── Top customers by revenue (all time) ──────────────────
+    top_customers = []
+    cust_rows = (
+        db.query(Invoice.customer_id, func.sum(Invoice.total).label("total_revenue"))
+        .filter(Invoice.company_id == company_id, Invoice.status.in_(["Paid", "Partial", "Sent", "Overdue"]))
+        .group_by(Invoice.customer_id)
+        .order_by(func.sum(Invoice.total).desc())
+        .limit(8)
+        .all()
+    )
+    for cid, rev in cust_rows:
+        cust = db.query(Customer).filter(Customer.id == cid).first() if cid else None
+        top_customers.append({
+            "customer_id":   cid,
+            "customer_name": cust.name if cust else "Walk-in",
+            "revenue":       round(float(rev or 0), 2),
+        })
+
+    # ── Payment method breakdown ──────────────────────────────
+    method_rows = (
+        db.query(InvoicePayment.method, func.sum(InvoicePayment.amount))
+        .filter(InvoicePayment.company_id == company_id)
+        .group_by(InvoicePayment.method)
+        .all()
+    )
+    payment_methods = [{"method": m, "total": round(float(t or 0), 2)} for m, t in method_rows]
+
+    return {
+        "monthly":          monthly,
+        "totals": {
+            "revenue":      total_revenue,
+            "cash_received": total_cash,
+            "cogs":         total_cogs,
+            "gross_profit": total_gp,
+            "gp_pct":       total_gp_pct,
+            "outstanding":  round(float(outstanding), 2),
+            "overdue":      round(float(overdue), 2),
+        },
+        "top_customers":    top_customers,
+        "payment_methods":  payment_methods,
+    }

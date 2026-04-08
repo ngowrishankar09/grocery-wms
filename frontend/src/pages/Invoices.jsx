@@ -4,16 +4,138 @@ import { printInvoice } from '../utils/invoiceTemplates'
 import {
   FileText, Plus, Printer, Send, CheckCircle, Trash2,
   ChevronDown, ChevronUp, X, Search, RefreshCw,
-  Edit2, AlertCircle, DollarSign, Mail, Clock, AlertTriangle
+  Edit2, AlertCircle, DollarSign, Mail, Clock, AlertTriangle,
+  Banknote, CreditCard, Wallet
 } from 'lucide-react'
 
 // ── Status badge ─────────────────────────────────────────────
 const STATUS_STYLES = {
   Draft:     'bg-gray-100 text-gray-700',
   Sent:      'bg-blue-100 text-blue-700',
+  Partial:   'bg-indigo-100 text-indigo-700',
   Paid:      'bg-green-100 text-green-700',
   Overdue:   'bg-red-100 text-red-700',
   Cancelled: 'bg-orange-100 text-orange-700',
+}
+
+// ── Receive Payment Modal (QuickBooks-style) ──────────────────
+function ReceivePaymentModal({ inv, onClose, onSaved }) {
+  const today = new Date().toISOString().split('T')[0]
+  const balanceDue = inv.balance_due ?? (inv.grand_total || inv.total)
+  const [form, setForm] = useState({
+    payment_date: today,
+    amount: balanceDue > 0 ? balanceDue.toFixed(2) : '',
+    method: 'Bank Transfer',
+    reference: '',
+    notes: '',
+  })
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState('')
+
+  const METHODS = ['Cash', 'Bank Transfer', 'Check', 'Card', 'Other']
+
+  async function handleSubmit(e) {
+    e.preventDefault()
+    if (!form.amount || parseFloat(form.amount) <= 0) { setErr('Enter a valid amount'); return }
+    setSaving(true)
+    try {
+      const r = await invoiceAPI.recordPayment(inv.id, {
+        ...form,
+        amount: parseFloat(form.amount),
+      })
+      onSaved(r.data)
+    } catch (ex) {
+      setErr(ex?.response?.data?.detail || 'Failed to record payment')
+    } finally { setSaving(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+        <div className="flex items-center justify-between px-6 py-4 border-b">
+          <h2 className="text-lg font-bold flex items-center gap-2">
+            <Banknote size={18} className="text-green-600" /> Receive Payment
+          </h2>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400"><X size={18} /></button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="px-6 py-4 space-y-4">
+          {/* Invoice summary */}
+          <div className="bg-gray-50 rounded-xl px-4 py-3 text-sm">
+            <div className="flex justify-between text-gray-700">
+              <span className="font-medium">{inv.invoice_number}</span>
+              <span className="font-mono">{inv.customer_name || inv.store_name}</span>
+            </div>
+            <div className="flex justify-between mt-1 text-xs text-gray-500">
+              <span>Invoice total: <strong>{fmt(inv.grand_total || inv.total)}</strong></span>
+              <span className="text-orange-600 font-semibold">Balance due: {fmt(balanceDue)}</span>
+            </div>
+            {inv.payments?.length > 0 && (
+              <div className="mt-2 pt-2 border-t border-gray-200 space-y-1">
+                {inv.payments.map(p => (
+                  <div key={p.id} className="flex justify-between text-xs text-green-700">
+                    <span>{p.payment_date} · {p.method}</span>
+                    <span className="font-semibold">{fmt(p.amount)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {err && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{err}</p>}
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Payment Date *</label>
+              <input type="date" required value={form.payment_date}
+                onChange={e => setForm(f => ({ ...f, payment_date: e.target.value }))}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Amount *</label>
+              <input type="number" step="0.01" min="0.01" required value={form.amount}
+                onChange={e => setForm(f => ({ ...f, amount: e.target.value }))}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Method</label>
+              <select value={form.method}
+                onChange={e => setForm(f => ({ ...f, method: e.target.value }))}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
+                {METHODS.map(m => <option key={m}>{m}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Reference #</label>
+              <input type="text" value={form.reference}
+                onChange={e => setForm(f => ({ ...f, reference: e.target.value }))}
+                placeholder="Chq #, TXN ID…"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 mb-1">Notes</label>
+            <input type="text" value={form.notes}
+              onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
+              placeholder="Optional notes"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+          </div>
+
+          <div className="flex justify-end gap-3 pt-1">
+            <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-sm text-gray-600 hover:bg-gray-100">Cancel</button>
+            <button type="submit" disabled={saving}
+              className="px-5 py-2 rounded-lg text-sm font-semibold bg-green-600 text-white hover:bg-green-700 disabled:opacity-60 flex items-center gap-2">
+              <Banknote size={14} /> {saving ? 'Saving…' : 'Record Payment'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
 }
 
 function StatusBadge({ status }) {
@@ -528,6 +650,7 @@ export default function Invoices() {
   const [showFromOrder, setFromOrder]    = useState(false)
   const [editInvoice,   setEditInvoice]  = useState(null)
   const [emailInvoice,  setEmailInvoice] = useState(null)
+  const [payInvoice,    setPayInvoice]   = useState(null)
   const [busy,          setBusy]         = useState({})
 
   const load = useCallback(async () => {
@@ -584,7 +707,7 @@ export default function Invoices() {
     setExpanded(inv.id)
   }
 
-  const FILTERS = ['all', 'Draft', 'Sent', 'Paid', 'Overdue', 'Cancelled']
+  const FILTERS = ['all', 'Draft', 'Sent', 'Partial', 'Paid', 'Overdue', 'Cancelled']
 
   return (
     <div className="max-w-6xl mx-auto space-y-5">
@@ -689,11 +812,11 @@ export default function Invoices() {
                     </td>
                     <td className="px-4 py-3 text-right font-semibold text-gray-800 text-xs">{fmt(inv.total)}</td>
                     <td className="px-4 py-3 text-right">
-                      <span className={`font-bold text-sm ${inv.previous_balance > 0 ? 'text-red-600' : 'text-gray-900'}`}>
-                        {fmt(inv.grand_total || inv.total)}
+                      <span className={`font-bold text-sm ${(inv.balance_due ?? inv.grand_total) > 0 && inv.status !== 'Paid' ? 'text-orange-600' : 'text-gray-900'}`}>
+                        {fmt(inv.balance_due ?? inv.grand_total ?? inv.total)}
                       </span>
-                      {inv.previous_balance > 0 && (
-                        <p className="text-xs text-red-400">incl. {fmt(inv.previous_balance)} prev.</p>
+                      {inv.amount_paid > 0 && inv.status !== 'Paid' && (
+                        <p className="text-xs text-green-600">paid {fmt(inv.amount_paid)}</p>
                       )}
                     </td>
                     <td className="px-4 py-3 text-center"><StatusBadge status={inv.status} /></td>
@@ -734,9 +857,16 @@ export default function Invoices() {
                             <AlertCircle size={13} />
                           </button>
                         )}
+                        {/* Receive Payment (QB-style) */}
+                        {['Sent', 'Overdue', 'Partial'].includes(inv.status) && (
+                          <button title="Receive Payment" onClick={() => setPayInvoice(inv)}
+                            className="p-1.5 text-gray-400 hover:text-green-700 hover:bg-green-50 rounded-lg">
+                            <Banknote size={13} />
+                          </button>
+                        )}
                         {/* Mark Paid */}
-                        {['Sent', 'Overdue'].includes(inv.status) && (
-                          <button title="Mark Paid" onClick={() => doAction(inv.id, () => invoiceAPI.markPaid(inv.id), 'Paid')}
+                        {['Sent', 'Overdue', 'Partial'].includes(inv.status) && (
+                          <button title="Mark Fully Paid" onClick={() => doAction(inv.id, () => invoiceAPI.markPaid(inv.id), 'Paid')}
                             disabled={!!busy[inv.id]}
                             className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg disabled:opacity-40">
                             <CheckCircle size={13} />
@@ -818,6 +948,55 @@ export default function Invoices() {
                             )}
                           </div>
                         </div>
+                        {/* Payment ledger */}
+                        {(inv.payments?.length > 0 || ['Sent','Overdue','Partial'].includes(inv.status)) && (
+                          <div className="mt-4 border-t pt-3">
+                            <div className="flex items-center justify-between mb-2">
+                              <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Payment History</p>
+                              {['Sent','Overdue','Partial'].includes(inv.status) && (
+                                <button onClick={() => setPayInvoice(inv)}
+                                  className="flex items-center gap-1 text-xs bg-green-600 text-white px-2.5 py-1 rounded-lg hover:bg-green-700">
+                                  <Banknote size={11} /> Receive Payment
+                                </button>
+                              )}
+                            </div>
+                            {inv.payments?.length > 0 ? (
+                              <table className="w-full text-xs">
+                                <thead>
+                                  <tr className="text-gray-400 border-b border-gray-100">
+                                    <th className="text-left pb-1 font-medium">Date</th>
+                                    <th className="text-left pb-1 font-medium">Method</th>
+                                    <th className="text-left pb-1 font-medium">Reference</th>
+                                    <th className="text-right pb-1 font-medium">Amount</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {inv.payments.map(p => (
+                                    <tr key={p.id} className="border-b border-gray-50">
+                                      <td className="py-1 text-gray-600">{p.payment_date}</td>
+                                      <td className="py-1 text-gray-600">{p.method}</td>
+                                      <td className="py-1 text-gray-400">{p.reference || '—'}</td>
+                                      <td className="py-1 text-right font-semibold text-green-700">{fmt(p.amount)}</td>
+                                    </tr>
+                                  ))}
+                                  <tr className="font-semibold">
+                                    <td colSpan={3} className="pt-1.5 text-gray-700">Total Paid</td>
+                                    <td className="pt-1.5 text-right text-green-700">{fmt(inv.amount_paid)}</td>
+                                  </tr>
+                                  {inv.balance_due > 0 && (
+                                    <tr className="font-bold text-orange-600">
+                                      <td colSpan={3} className="pt-0.5">Balance Due</td>
+                                      <td className="pt-0.5 text-right">{fmt(inv.balance_due)}</td>
+                                    </tr>
+                                  )}
+                                </tbody>
+                              </table>
+                            ) : (
+                              <p className="text-xs text-gray-400 italic">No payments recorded yet.</p>
+                            )}
+                          </div>
+                        )}
+
                         {inv.payment_terms && (
                           <p className="mt-2 text-xs text-gray-500">Terms: {inv.payment_terms}</p>
                         )}
@@ -831,6 +1010,18 @@ export default function Invoices() {
           </table>
         )}
       </div>
+
+      {/* Receive Payment Modal */}
+      {payInvoice && (
+        <ReceivePaymentModal
+          inv={payInvoice}
+          onClose={() => setPayInvoice(null)}
+          onSaved={(updated) => {
+            setInvoices(prev => prev.map(i => i.id === updated.id ? updated : i))
+            setPayInvoice(null)
+          }}
+        />
+      )}
 
       {/* Modals */}
       {showCreate   && <InvoiceForm  onClose={() => setShowCreate(false)} onSaved={onCreated} />}

@@ -23,6 +23,7 @@ import StockTake from './pages/StockTake'
 import DispatchBoard from './pages/DispatchBoard'
 import Spreadsheet from './pages/Spreadsheet'
 import QuickBooks from './pages/QuickBooks'
+import Finance    from './pages/Finance'
 import BinLocations from './pages/BinLocations'
 import PurchaseOrders from './pages/PurchaseOrders'
 import MobilePicking from './pages/MobilePicking'
@@ -88,6 +89,7 @@ function ProtectedRoutes({ lang, setLang }) {
         <Route path="/dispatch-board"  element={<DispatchBoard />} />
         <Route path="/spreadsheet"     element={<Spreadsheet />} />
         <Route path="/quickbooks"      element={<QuickBooks />} />
+        <Route path="/finance"         element={<Finance />} />
         <Route path="/bin-locations"   element={<BinLocations />} />
         <Route path="/purchase-orders" element={<PurchaseOrders />} />
         <Route path="/picking"         element={<MobilePicking />} />
