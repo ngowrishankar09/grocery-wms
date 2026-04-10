@@ -94,6 +94,7 @@ class SKU(Base):
     image_url       = Column(String, nullable=True)         # product image path
     show_goods_date_on_picking = Column(Boolean, default=False)  # show expiry/goods date to picker
     require_expiry_entry       = Column(Boolean, default=False)  # picker must enter expiry date
+    floor_price     = Column(Float, nullable=True)   # min price below which approval required
     is_active       = Column(Boolean, default=True)
     created_at      = Column(DateTime, default=datetime.utcnow)
 
@@ -134,6 +135,11 @@ class Batch(Base):
     expiry_date     = Column(Date, nullable=True)          # null = no expiry
     has_expiry      = Column(Boolean, default=True)
     lot_number      = Column(String, nullable=True)        # supplier lot/batch number
+    po_item_id      = Column(Integer, ForeignKey("purchase_order_items.id"), nullable=True)
+    is_recalled     = Column(Boolean, default=False)
+    recall_reason   = Column(String, nullable=True)
+    recalled_at     = Column(DateTime, nullable=True)
+    landed_cost_per_case = Column(Float, nullable=True)
     supplier_ref    = Column(String)                       # supplier invoice/ref
     notes           = Column(Text)
     created_at      = Column(DateTime, default=datetime.utcnow)
@@ -229,6 +235,7 @@ class Customer(Base):
     credit_limit     = Column(Float, nullable=True)     # max outstanding balance; None = unlimited
     credit_hold      = Column(Boolean, default=False)   # hard block on new orders
     payment_terms    = Column(String, nullable=True)    # default e.g. "Net 30"
+    discount_pct     = Column(Float, default=0.0, nullable=True)  # default line-item discount % for this customer
 
     orders           = relationship("Order", back_populates="customer")
     price_list       = relationship("PriceList", back_populates="customers")
@@ -265,6 +272,11 @@ class Order(Base):
     picking_queued     = Column(Boolean, default=False)  # admin explicitly queued for picking
     picking_started_at = Column(DateTime)                # picker started
     picking_ended_at   = Column(DateTime)                # picker finished
+    approval_status = Column(String, nullable=True)   # None | pending | approved | rejected
+    approval_note   = Column(Text, nullable=True)
+    approved_by     = Column(String, nullable=True)
+    approved_at     = Column(DateTime, nullable=True)
+    promised_date   = Column(Date, nullable=True)
 
     customer        = relationship("Customer", back_populates="orders")
     items           = relationship("OrderItem", back_populates="order")
@@ -492,6 +504,12 @@ class PurchaseOrder(Base):
     warehouse       = Column(String, default="WH1")    # destination warehouse
     expected_date   = Column(Date, nullable=True)
     notes           = Column(Text, default="")
+    freight_cost    = Column(Float, default=0.0)
+    duty_cost       = Column(Float, default=0.0)
+    other_cost      = Column(Float, default=0.0)
+    landed_cost_allocated = Column(Boolean, default=False)
+    currency        = Column(String, default="USD")
+    exchange_rate   = Column(Float, default=1.0)
     created_at      = Column(DateTime, default=datetime.utcnow)
 
     vendor          = relationship("Vendor")
@@ -506,9 +524,48 @@ class PurchaseOrderItem(Base):
     cases_ordered   = Column(Integer, nullable=False)
     cases_received  = Column(Integer, default=0)
     unit_cost       = Column(Float, nullable=True)     # cost per case on this PO
+    landed_cost_per_case = Column(Float, nullable=True)
+    landed_unit_cost     = Column(Float, nullable=True)
 
     po              = relationship("PurchaseOrder", back_populates="items")
     sku             = relationship("SKU")
+
+
+# ─── Supplier ASN (Advance Ship Notice) ──────────────────────
+class SupplierASN(Base):
+    __tablename__ = "supplier_asns"
+
+    id           = Column(Integer, primary_key=True, index=True)
+    company_id   = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
+    asn_number   = Column(String, unique=True, index=True, nullable=False)
+    po_id        = Column(Integer, ForeignKey("purchase_orders.id"), nullable=True)
+    vendor_id    = Column(Integer, ForeignKey("vendors.id"), nullable=True)
+    status       = Column(String, default="Pending")  # Pending|In Transit|Arrived|Received
+    ship_date    = Column(Date, nullable=True)
+    eta          = Column(Date, nullable=True)
+    carrier      = Column(String, nullable=True)
+    tracking_number = Column(String, nullable=True)
+    notes        = Column(Text, nullable=True)
+    created_at   = Column(DateTime, default=datetime.utcnow)
+
+    vendor = relationship("Vendor")
+    po     = relationship("PurchaseOrder")
+    items  = relationship("SupplierASNItem", back_populates="asn", cascade="all, delete-orphan")
+
+
+class SupplierASNItem(Base):
+    __tablename__ = "supplier_asn_items"
+
+    id             = Column(Integer, primary_key=True, index=True)
+    asn_id         = Column(Integer, ForeignKey("supplier_asns.id"), nullable=False)
+    sku_id         = Column(Integer, ForeignKey("skus.id"), nullable=False)
+    cases_expected = Column(Integer, nullable=False)
+    cases_received = Column(Integer, default=0)
+    lot_number     = Column(String, nullable=True)
+    expiry_date    = Column(Date, nullable=True)
+
+    asn = relationship("SupplierASN", back_populates="items")
+    sku = relationship("SKU")
 
 
 # ─── Customer Returns ─────────────────────────────────────────
@@ -585,6 +642,7 @@ class CompanyProfile(Base):
     portal_show_price    = Column(Boolean, default=True)
     portal_show_stock    = Column(Boolean, default=True)
     portal_show_invoices = Column(Boolean, default=True)
+    base_currency   = Column(String, default="USD")
 
 
 # ─── Customer Invoices ────────────────────────────────────────
@@ -612,6 +670,8 @@ class Invoice(Base):
     previous_balance = Column(Float, default=0.0)   # carried-forward balance
     grand_total      = Column(Float, default=0.0)   # total + previous_balance
     num_pallets      = Column(Integer, nullable=True)  # pallet count at dispatch
+    currency        = Column(String, default="USD")
+    exchange_rate   = Column(Float, default=1.0)
     created_at       = Column(DateTime, default=datetime.utcnow)
 
     customer  = relationship("Customer")
@@ -628,11 +688,14 @@ class InvoiceItem(Base):
     invoice_id   = Column(Integer, ForeignKey("invoices.id"), nullable=False)
     sku_id       = Column(Integer, ForeignKey("skus.id"),     nullable=True)
     description  = Column(String,  nullable=False)
-    cases_qty    = Column(Integer, nullable=False, default=1)
-    unit_price   = Column(Float,   nullable=False, default=0.0)
-    line_total   = Column(Float,   nullable=False, default=0.0)
-    expiry_date  = Column(Text,    nullable=True)  # best-before entered by picker
-    notes        = Column(Text,    nullable=True)  # per-line notes (special instructions, etc.)
+    cases_qty        = Column(Integer, nullable=False, default=1)
+    unit_price       = Column(Float,   nullable=False, default=0.0)
+    line_total       = Column(Float,   nullable=False, default=0.0)  # post-discount total
+    discount_pct     = Column(Float,   default=0.0)      # % discount applied to this line
+    discount_excluded = Column(Boolean, default=False)   # True = this line is excluded from customer discount
+    discount_amount  = Column(Float,   default=0.0)      # dollar amount discounted on this line
+    expiry_date      = Column(Text,    nullable=True)
+    notes            = Column(Text,    nullable=True)
 
     invoice  = relationship("Invoice",  back_populates="items")
     sku      = relationship("SKU")
@@ -813,6 +876,140 @@ class WarehouseTask(Base):
     sku           = relationship("SKU")
     batch         = relationship("Batch")
     order         = relationship("Order")
+
+
+# ─── Credit Notes ─────────────────────────────────────────────
+class CreditNote(Base):
+    __tablename__ = "credit_notes"
+    id             = Column(Integer, primary_key=True, index=True)
+    company_id     = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
+    credit_note_number = Column(String, unique=True, index=True, nullable=False)
+    customer_id    = Column(Integer, ForeignKey("customers.id"), nullable=True)
+    invoice_id     = Column(Integer, ForeignKey("invoices.id"), nullable=True)
+    return_id      = Column(Integer, ForeignKey("customer_returns.id"), nullable=True)
+    credit_date    = Column(Date, nullable=False)
+    status         = Column(String, default="Open")  # Open|Applied|Void
+    reason         = Column(String, nullable=True)   # Return|Price Correction|Goodwill|Other
+    subtotal       = Column(Float, default=0.0)
+    tax_amount     = Column(Float, default=0.0)
+    total          = Column(Float, default=0.0)
+    amount_applied = Column(Float, default=0.0)  # amount applied against invoices
+    notes          = Column(Text, nullable=True)
+    created_at     = Column(DateTime, default=datetime.utcnow)
+    customer  = relationship("Customer")
+    invoice   = relationship("Invoice")
+    items     = relationship("CreditNoteItem", back_populates="credit_note", cascade="all, delete-orphan")
+
+class CreditNoteItem(Base):
+    __tablename__ = "credit_note_items"
+    id             = Column(Integer, primary_key=True, index=True)
+    credit_note_id = Column(Integer, ForeignKey("credit_notes.id"), nullable=False)
+    sku_id         = Column(Integer, ForeignKey("skus.id"), nullable=True)
+    description    = Column(String, nullable=False)
+    qty            = Column(Float, default=1.0)
+    unit_price     = Column(Float, default=0.0)
+    line_total     = Column(Float, default=0.0)
+    credit_note    = relationship("CreditNote", back_populates="items")
+    sku            = relationship("SKU")
+
+# ─── Vendor Bills (Accounts Payable) ─────────────────────────
+class VendorBill(Base):
+    __tablename__ = "vendor_bills"
+    id             = Column(Integer, primary_key=True, index=True)
+    company_id     = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
+    bill_number    = Column(String, unique=True, index=True, nullable=False)
+    vendor_id      = Column(Integer, ForeignKey("vendors.id"), nullable=True)
+    po_id          = Column(Integer, ForeignKey("purchase_orders.id"), nullable=True)
+    bill_date      = Column(Date, nullable=False)
+    due_date       = Column(Date, nullable=True)
+    status         = Column(String, default="Draft")  # Draft|Received|Approved|Paid|Partial|Overdue
+    vendor_ref     = Column(String, nullable=True)    # vendor's own invoice number
+    subtotal       = Column(Float, default=0.0)
+    tax_amount     = Column(Float, default=0.0)
+    total          = Column(Float, default=0.0)
+    amount_paid    = Column(Float, default=0.0)
+    notes          = Column(Text, nullable=True)
+    created_at     = Column(DateTime, default=datetime.utcnow)
+    vendor    = relationship("Vendor")
+    po        = relationship("PurchaseOrder")
+    items     = relationship("VendorBillItem", back_populates="bill", cascade="all, delete-orphan")
+    payments  = relationship("VendorPayment", back_populates="bill", cascade="all, delete-orphan")
+
+class VendorBillItem(Base):
+    __tablename__ = "vendor_bill_items"
+    id          = Column(Integer, primary_key=True, index=True)
+    bill_id     = Column(Integer, ForeignKey("vendor_bills.id"), nullable=False)
+    sku_id      = Column(Integer, ForeignKey("skus.id"), nullable=True)
+    description = Column(String, nullable=False)
+    qty         = Column(Float, default=1.0)
+    unit_cost   = Column(Float, default=0.0)
+    line_total  = Column(Float, default=0.0)
+    bill        = relationship("VendorBill", back_populates="items")
+    sku         = relationship("SKU")
+
+class VendorPayment(Base):
+    __tablename__ = "vendor_payments"
+    id           = Column(Integer, primary_key=True, index=True)
+    company_id   = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
+    bill_id      = Column(Integer, ForeignKey("vendor_bills.id"), nullable=False)
+    payment_date = Column(Date, nullable=False)
+    amount       = Column(Float, nullable=False)
+    method       = Column(String, default="Bank Transfer")
+    reference    = Column(String, nullable=True)
+    notes        = Column(Text, nullable=True)
+    created_at   = Column(DateTime, default=datetime.utcnow)
+    bill = relationship("VendorBill", back_populates="payments")
+
+# ─── Sales Quotations ─────────────────────────────────────────
+class Quote(Base):
+    __tablename__ = "quotes"
+    id            = Column(Integer, primary_key=True, index=True)
+    company_id    = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
+    quote_number  = Column(String, unique=True, index=True, nullable=False)
+    customer_id   = Column(Integer, ForeignKey("customers.id"), nullable=True)
+    store_name    = Column(String, nullable=False)
+    quote_date    = Column(Date, nullable=False)
+    expiry_date   = Column(Date, nullable=True)
+    status        = Column(String, default="Draft")  # Draft|Sent|Accepted|Rejected|Expired|Converted
+    order_id      = Column(Integer, ForeignKey("orders.id"), nullable=True)  # if converted
+    subtotal      = Column(Float, default=0.0)
+    discount_amount = Column(Float, default=0.0)
+    tax_amount    = Column(Float, default=0.0)
+    total         = Column(Float, default=0.0)
+    notes         = Column(Text, nullable=True)
+    terms         = Column(Text, nullable=True)
+    created_at    = Column(DateTime, default=datetime.utcnow)
+    customer = relationship("Customer")
+    order    = relationship("Order")
+    items    = relationship("QuoteItem", back_populates="quote", cascade="all, delete-orphan")
+
+class QuoteItem(Base):
+    __tablename__ = "quote_items"
+    id          = Column(Integer, primary_key=True, index=True)
+    quote_id    = Column(Integer, ForeignKey("quotes.id"), nullable=False)
+    sku_id      = Column(Integer, ForeignKey("skus.id"), nullable=True)
+    description = Column(String, nullable=False)
+    qty         = Column(Float, default=1.0)
+    unit_price  = Column(Float, default=0.0)
+    line_total  = Column(Float, default=0.0)
+    notes       = Column(Text, nullable=True)
+    quote       = relationship("Quote", back_populates="items")
+    sku         = relationship("SKU")
+
+# ─── Audit Log ────────────────────────────────────────────────
+class AuditLog(Base):
+    __tablename__ = "audit_log"
+    id          = Column(Integer, primary_key=True, index=True)
+    company_id  = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
+    user_id     = Column(Integer, ForeignKey("users.id"), nullable=True)
+    username    = Column(String, nullable=True)
+    action      = Column(String, nullable=False)   # create|update|delete|login|dispatch|receive|payment
+    entity_type = Column(String, nullable=True)    # order|invoice|customer|sku|po|batch...
+    entity_id   = Column(Integer, nullable=True)
+    entity_ref  = Column(String, nullable=True)    # human-readable ref e.g. ORD-20260101-0001
+    detail      = Column(Text, nullable=True)      # JSON or text description of what changed
+    ip_address  = Column(String, nullable=True)
+    created_at  = Column(DateTime, default=datetime.utcnow, index=True)
 
 
 def get_engine(db_path="./wms.db"):

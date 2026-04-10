@@ -37,6 +37,7 @@ export const skuAPI = {
   update: (id, data) => api.put(`/skus/${id}`, data),
   get: (id) => api.get(`/skus/${id}`),
   categories: () => api.get('/skus/categories/list'),
+  lookupBarcode: (barcode) => api.get(`/skus/barcode/${barcode}`),
 }
 
 export const vendorAPI = {
@@ -61,6 +62,9 @@ export const orderAPI = {
   sendToPicking: (id, pickerName) => api.post(`/orders/${id}/send-to-picking`, { picker_name: pickerName || null }),
   startPicking:  (id, pickerName)   => api.post(`/orders/${id}/start-picking`,  { picker_name: pickerName || null }),
   endPicking:    (id, actualPicks)  => api.post(`/orders/${id}/end-picking`, actualPicks ? { actual_picks: actualPicks } : {}),
+  pendingApproval: () => api.get('/orders/pending-approval'),
+  approve: (id, note) => api.post(`/orders/${id}/approve`, { note }),
+  reject: (id, note) => api.post(`/orders/${id}/reject`, { note }),
 }
 
 export const inventoryAPI = {
@@ -193,16 +197,57 @@ export const invoiceAPI = {
   markOverdue:      (id)       => api.post(`/invoices/${id}/mark-overdue`),
   agingSummary:     ()         => api.get('/invoices/aging-summary'),
   markOverdueBatch: ()         => api.post('/invoices/mark-overdue-batch'),
+  sendReminders:    ()         => api.post('/invoices/send-reminders'),
   // Payments
   listPayments:     (id)       => api.get(`/invoices/${id}/payments`),
   recordPayment:    (id, data) => api.post(`/invoices/${id}/payments`, data),
   deletePayment:    (id, pid)  => api.delete(`/invoices/${id}/payments/${pid}`),
   // Journal
   journal:          (limit)    => api.get('/invoices/journal', { params: limit ? { limit } : {} }),
+  // Statement
+  statement: (customerId, params) => api.get(`/invoices/statement/${customerId}`, { params }),
 }
 
 export const financialAPI = {
   pl:  (months) => api.get('/reports/financials', { params: { months: months || 6 } }),
+}
+
+export const reportAPI = {
+  expiryAlerts: (days_ahead = 30) => api.get('/reports/expiry-alerts', { params: { days_ahead } }),
+  balanceSheet: () => api.get('/reports/balance-sheet'),
+}
+
+export const creditNoteAPI = {
+  list:   ()           => api.get('/credit-notes'),
+  create: (data)       => api.post('/credit-notes', data),
+  get:    (id)         => api.get(`/credit-notes/${id}`),
+  apply:  (id, data)   => api.post(`/credit-notes/${id}/apply`, data),
+  void:   (id)         => api.post(`/credit-notes/${id}/void`),
+  delete: (id)         => api.delete(`/credit-notes/${id}`),
+}
+
+export const vendorBillAPI = {
+  list:          (params)       => api.get('/vendor-bills', { params }),
+  create:        (data)         => api.post('/vendor-bills', data),
+  get:           (id)           => api.get(`/vendor-bills/${id}`),
+  fromPO:        (poId)         => api.post(`/vendor-bills/from-po/${poId}`),
+  updateStatus:  (id, status)   => api.patch(`/vendor-bills/${id}/status`, { status }),
+  recordPayment: (id, data)     => api.post(`/vendor-bills/${id}/payments`, data),
+  aging:         ()             => api.get('/vendor-bills/aging'),
+  delete:        (id)           => api.delete(`/vendor-bills/${id}`),
+}
+
+export const quoteAPI = {
+  list:         (params)     => api.get('/quotes', { params }),
+  create:       (data)       => api.post('/quotes', data),
+  get:          (id)         => api.get(`/quotes/${id}`),
+  updateStatus: (id, status) => api.patch(`/quotes/${id}/status`, { status }),
+  convert:      (id)         => api.post(`/quotes/${id}/convert`),
+  delete:       (id)         => api.delete(`/quotes/${id}`),
+}
+
+export const auditAPI = {
+  list: (params) => api.get('/audit-log', { params }),
 }
 
 export const purchaseOrderAPI = {
@@ -217,6 +262,8 @@ export const purchaseOrderAPI = {
     api.post(`/purchase-orders/${id}/receive`, items, {
       params: receivedDate ? { received_date: receivedDate } : {},
     }),
+  landedCosts: (poId, data) => api.post(`/purchase-orders/${poId}/landed-costs`, data),
+  autoReorder: (dry_run = true) => api.post('/purchase-orders/auto-reorder', { dry_run }),
 }
 
 // ── Labels ───────────────────────────────────────────────────
@@ -367,6 +414,29 @@ export const emailAPI = {
   testSMTP:       ()            => api.post('/email/test'),
   sendInvoice:    (id, data)    => api.post(`/email/invoice/${id}`, data),
   sendPO:         (id, data)    => api.post(`/email/purchase-order/${id}`, data),
+}
+
+export const traceabilityAPI = {
+  search: (q) => api.get('/traceability/search', { params: { q } }),
+  forwardTrace: (batchCode) => api.get(`/traceability/batch/${batchCode}/forward`),
+  backwardTrace: (batchCode) => api.get(`/traceability/batch/${batchCode}/backward`),
+  batchesForSku: (skuId) => api.get(`/traceability/sku/${skuId}/batches`),
+  listRecalls: () => api.get('/traceability/recalls'),
+  recall: (batchCode, reason) => api.post(`/traceability/recall/${batchCode}`, { reason }),
+  undoRecall: (batchCode) => api.post(`/traceability/recall/${batchCode}/undo`),
+}
+
+export const asnAPI = {
+  list: () => api.get('/asn/asns'),
+  create: (data) => api.post('/asn/asns', data),
+  get: (id) => api.get(`/asn/asns/${id}`),
+  update: (id, data) => api.put(`/asn/asns/${id}`, data),
+  updateStatus: (id, status) => api.patch(`/asn/asns/${id}/status`, { status }),
+  delete: (id) => api.delete(`/asn/asns/${id}`),
+}
+
+export const kpiAPI = {
+  scorecard: (period_days = 30) => api.get('/kpi/scorecard', { params: { period_days } }),
 }
 
 // ── Auth / Registration ───────────────────────────────────────

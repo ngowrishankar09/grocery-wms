@@ -408,6 +408,77 @@ def dispatch_order(
         result["invoice_id"]     = auto_invoice.id
     return result
 
+@router.get("/pending-approval")
+def pending_approval(
+    db: Session = Depends(get_db),
+    company_id: int = Depends(get_company_id),
+):
+    orders = db.query(Order).filter(
+        Order.company_id == company_id,
+        Order.approval_status == "pending"
+    ).order_by(Order.created_at.desc()).all()
+    return [
+        {
+            "id": o.id,
+            "order_number": o.order_number,
+            "store_name": o.store_name,
+            "customer_name": o.customer.name if o.customer else None,
+            "order_date": o.order_date.isoformat(),
+            "status": o.status,
+            "approval_status": getattr(o, "approval_status", None),
+            "items": [
+                {
+                    "sku_code": i.sku.sku_code if i.sku else None,
+                    "product_name": i.sku.product_name if i.sku else None,
+                    "cases_requested": i.cases_requested,
+                    "unit_price": i.unit_price,
+                    "floor_price": getattr(i.sku, "floor_price", None) if i.sku else None,
+                }
+                for i in o.items
+            ],
+        }
+        for o in orders
+    ]
+
+
+@router.post("/{order_id}/approve")
+def approve_order(
+    order_id: int,
+    payload: dict = {},
+    db: Session = Depends(get_db),
+    company_id: int = Depends(get_company_id),
+    current_user=Depends(get_current_user),
+):
+    order = db.query(Order).filter(Order.id == order_id, Order.company_id == company_id).first()
+    if not order:
+        raise HTTPException(404, "Order not found")
+    order.approval_status = "approved"
+    order.approval_note = payload.get("note")
+    order.approved_by = getattr(current_user, "username", "admin")
+    order.approved_at = datetime.utcnow()
+    db.commit()
+    return {"ok": True}
+
+
+@router.post("/{order_id}/reject")
+def reject_order(
+    order_id: int,
+    payload: dict = {},
+    db: Session = Depends(get_db),
+    company_id: int = Depends(get_company_id),
+    current_user=Depends(get_current_user),
+):
+    order = db.query(Order).filter(Order.id == order_id, Order.company_id == company_id).first()
+    if not order:
+        raise HTTPException(404, "Order not found")
+    order.approval_status = "rejected"
+    order.approval_note = payload.get("note")
+    order.approved_by = getattr(current_user, "username", "admin")
+    order.approved_at = datetime.utcnow()
+    db.commit()
+    return {"ok": True}
+
+
 @router.get("/{order_id}")
 def get_order(
     order_id: int,

@@ -25,7 +25,7 @@ from openpyxl.utils import get_column_letter
 import sys, os
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from database import get_db
-from models import SKU, Inventory, Batch, DispatchRecord, DispatchRecordItem, InventoryAdjustment, Invoice, InvoicePayment, PurchaseOrder, Customer
+from models import SKU, Inventory, Batch, DispatchRecord, DispatchRecordItem, InventoryAdjustment, Invoice, InvoicePayment, PurchaseOrder, Customer, VendorBill, VendorPayment
 from security import get_current_user, get_company_id
 from sqlalchemy import func, extract
 
@@ -745,4 +745,102 @@ def financials(
         },
         "top_customers":    top_customers,
         "payment_methods":  payment_methods,
+    }
+
+
+@router.get("/expiry-alerts")
+def expiry_alerts(days_ahead: int = 30, db: Session = Depends(get_db), company_id: int = Depends(get_company_id)):
+    """Return batches expiring within `days_ahead` days, including already-expired ones."""
+    from datetime import date, timedelta
+    today = date.today()
+    cutoff = today + timedelta(days=days_ahead)
+    batches = db.query(Batch).filter(
+        Batch.company_id == company_id,
+        Batch.expiry_date.isnot(None),
+        Batch.expiry_date <= cutoff,
+        Batch.cases_remaining > 0,
+    ).order_by(Batch.expiry_date.asc()).all()
+    result = []
+    for b in batches:
+        days_left = (b.expiry_date - today).days
+        result.append({
+            "batch_id": b.id,
+            "batch_code": b.batch_code,
+            "sku_id": b.sku_id,
+            "sku_code": b.sku.sku_code if b.sku else None,
+            "product_name": b.sku.product_name if b.sku else None,
+            "warehouse": b.warehouse,
+            "cases_remaining": b.cases_remaining,
+            "expiry_date": str(b.expiry_date),
+            "days_until_expiry": days_left,
+            "status": "Expired" if days_left < 0 else ("Critical" if days_left <= 7 else "Warning"),
+        })
+    return {
+        "as_of": str(today),
+        "days_ahead": days_ahead,
+        "total_batches": len(result),
+        "expired": sum(1 for r in result if r["status"] == "Expired"),
+        "critical": sum(1 for r in result if r["status"] == "Critical"),
+        "warning": sum(1 for r in result if r["status"] == "Warning"),
+        "batches": result,
+    }
+
+
+@router.get("/balance-sheet")
+def balance_sheet(db: Session = Depends(get_db), company_id: int = Depends(get_company_id)):
+    """Simplified balance sheet: Assets, Liabilities, Equity."""
+    from datetime import date
+    today = date.today()
+
+    # ── ASSETS ───────────────────────────────────────────────────
+    # Cash/Bank: sum of all invoice payments received
+    cash = db.query(func.sum(InvoicePayment.amount)).join(Invoice).filter(
+        Invoice.company_id == company_id).scalar() or 0
+    # Accounts Receivable: outstanding invoice balances
+    ar_total = db.query(func.sum(Invoice.grand_total)).filter(
+        Invoice.company_id == company_id, Invoice.status.notin_(["Draft", "Cancelled"])).scalar() or 0
+    ar_paid = db.query(func.sum(InvoicePayment.amount)).join(Invoice).filter(
+        Invoice.company_id == company_id).scalar() or 0
+    accounts_receivable = ar_total - ar_paid
+
+    # Inventory Value: cases_on_hand * cost_price per SKU
+    inv_rows = db.query(SKU.cost_price, func.sum(Inventory.cases_on_hand)).join(
+        Inventory, SKU.id == Inventory.sku_id).filter(SKU.company_id == company_id).group_by(SKU.id).all()
+    inventory_value = sum((cp or 0) * (qty or 0) for cp, qty in inv_rows)
+
+    total_assets = cash + accounts_receivable + inventory_value
+
+    # ── LIABILITIES ──────────────────────────────────────────────
+    # Accounts Payable: outstanding vendor bill balances
+    try:
+        ap_total = db.query(func.sum(VendorBill.total)).filter(
+            VendorBill.company_id == company_id, VendorBill.status.notin_(["Draft", "Paid"])).scalar() or 0
+        ap_paid = db.query(func.sum(VendorPayment.amount)).join(VendorBill).filter(
+            VendorBill.company_id == company_id).scalar() or 0
+        accounts_payable = ap_total - ap_paid
+    except Exception:
+        accounts_payable = 0
+
+    total_liabilities = accounts_payable
+
+    # ── EQUITY ───────────────────────────────────────────────────
+    equity = total_assets - total_liabilities
+
+    return {
+        "as_of": str(today),
+        "assets": {
+            "cash_and_bank": round(float(cash), 2),
+            "accounts_receivable": round(float(accounts_receivable), 2),
+            "inventory_value": round(float(inventory_value), 2),
+            "total_assets": round(float(total_assets), 2),
+        },
+        "liabilities": {
+            "accounts_payable": round(float(accounts_payable), 2),
+            "total_liabilities": round(float(total_liabilities), 2),
+        },
+        "equity": {
+            "retained_earnings": round(float(equity), 2),
+            "total_equity": round(float(equity), 2),
+        },
+        "check": round(float(total_assets), 2) == round(float(total_liabilities + equity), 2),
     }

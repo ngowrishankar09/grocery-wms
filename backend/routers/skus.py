@@ -31,6 +31,7 @@ class SKUCreate(BaseModel):
     vendor_id: Optional[int] = None
     cost_price: Optional[float] = None
     selling_price: Optional[float] = None
+    floor_price: Optional[float] = None
     show_goods_date_on_picking: bool = False
     require_expiry_entry: bool = False
 
@@ -51,6 +52,7 @@ class SKUUpdate(BaseModel):
     lead_time_days: Optional[int] = None
     vendor_id: Optional[int] = None
     is_active: Optional[bool] = None
+    floor_price: Optional[float] = None
     show_goods_date_on_picking: Optional[bool] = None
     require_expiry_entry: Optional[bool] = None
 
@@ -101,6 +103,7 @@ def list_skus(
             "vendor_name": sku.vendor.name if sku.vendor else None,
             "cost_price": sku.cost_price,
             "selling_price": getattr(sku, 'selling_price', None),
+            "floor_price": getattr(sku, 'floor_price', None),
             "show_goods_date_on_picking": getattr(sku, 'show_goods_date_on_picking', False),
             "require_expiry_entry": getattr(sku, 'require_expiry_entry', False),
             "image_url": sku.image_url,
@@ -137,6 +140,36 @@ def create_sku(
     db.commit()
     db.refresh(sku)
     return {"id": sku.id, "sku_code": sku.sku_code, "product_name": sku.product_name}
+
+
+@router.get("/barcode/{barcode}")
+def lookup_by_barcode(
+    barcode: str,
+    db: Session = Depends(get_db),
+    company_id: int = Depends(get_company_id),
+):
+    """Look up a SKU by its barcode (UPC/EAN-13)."""
+    sku = db.query(SKU).filter(SKU.barcode == barcode, SKU.company_id == company_id).first()
+    if not sku:
+        raise HTTPException(status_code=404, detail=f"No SKU found for barcode {barcode}")
+    inv = db.query(Inventory).filter(Inventory.sku_id == sku.id, Inventory.company_id == company_id).all()
+    wh1 = next((i.cases_on_hand for i in inv if i.warehouse == "WH1"), 0)
+    wh2 = next((i.cases_on_hand for i in inv if i.warehouse == "WH2"), 0)
+    return {
+        "id": sku.id,
+        "sku_code": sku.sku_code,
+        "barcode": sku.barcode,
+        "product_name": sku.product_name,
+        "category": sku.category,
+        "case_size": sku.case_size,
+        "unit_label": sku.unit_label,
+        "cost_price": sku.cost_price,
+        "selling_price": getattr(sku, "selling_price", None),
+        "floor_price": getattr(sku, "floor_price", None),
+        "wh1_cases": wh1,
+        "wh2_cases": wh2,
+        "total_cases": wh1 + wh2,
+    }
 
 
 @router.get("/{sku_id}")

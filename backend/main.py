@@ -5,7 +5,7 @@ from sqlalchemy import text
 import os, pathlib
 
 from database import engine, SessionLocal
-from models import create_tables, Warehouse, User, Company, CompanyProfile, WarehouseTask
+from models import create_tables, Warehouse, User, Company, CompanyProfile, WarehouseTask, SupplierASN, CreditNote, VendorBill, Quote, AuditLog
 from routers import skus, vendors, receiving, orders, inventory, transfers, forecasting, dashboard, upload, settings, dispatch
 from routers import reports, stock_take, notifications, dispatch_board, spreadsheet, quickbooks, bin_locations, purchase_orders, labels, customers, returns, invoices
 from routers.drivers import router as drivers_router, runs_router
@@ -16,6 +16,13 @@ from routers.price_lists import router as price_lists_router
 from routers.email import router as email_router
 from routers.portal import router as portal_router
 from routers.warehouse_tasks import router as warehouse_tasks_router
+from routers.traceability import router as traceability_router
+from routers.asn import router as asn_router
+from routers.kpi import router as kpi_router
+from routers.credit_notes import router as credit_notes_router
+from routers.vendor_bills import router as vendor_bills_router
+from routers.quotes import router as quotes_router
+from routers.audit_log import router as audit_log_router
 from security import hash_password, verify_password
 
 create_tables(engine)
@@ -100,6 +107,48 @@ def _migrate():
         ("customers", "credit_limit",  "FLOAT"),
         ("customers", "credit_hold",   "BOOLEAN DEFAULT 0"),
         ("customers", "payment_terms", "VARCHAR"),
+        # Batch traceability + recall + landed cost
+        ("batches", "po_item_id",           "INTEGER"),
+        ("batches", "is_recalled",          "BOOLEAN DEFAULT 0"),
+        ("batches", "recall_reason",        "VARCHAR"),
+        ("batches", "recalled_at",          "DATETIME"),
+        ("batches", "landed_cost_per_case", "FLOAT"),
+        # SKU floor price
+        ("skus", "floor_price", "FLOAT"),
+        # PO landed costs + currency
+        ("purchase_orders", "freight_cost",          "FLOAT DEFAULT 0.0"),
+        ("purchase_orders", "duty_cost",             "FLOAT DEFAULT 0.0"),
+        ("purchase_orders", "other_cost",            "FLOAT DEFAULT 0.0"),
+        ("purchase_orders", "landed_cost_allocated", "BOOLEAN DEFAULT 0"),
+        ("purchase_orders", "currency",              "VARCHAR DEFAULT 'USD'"),
+        ("purchase_orders", "exchange_rate",         "FLOAT DEFAULT 1.0"),
+        # PO item landed cost
+        ("purchase_order_items", "landed_cost_per_case", "FLOAT"),
+        ("purchase_order_items", "landed_unit_cost",     "FLOAT"),
+        # Order approval + promised date
+        ("orders", "approval_status", "VARCHAR"),
+        ("orders", "approval_note",   "TEXT"),
+        ("orders", "approved_by",     "VARCHAR"),
+        ("orders", "approved_at",     "DATETIME"),
+        ("orders", "promised_date",   "DATE"),
+        # Invoice currency
+        ("invoices", "currency",       "VARCHAR DEFAULT 'USD'"),
+        ("invoices", "exchange_rate",  "FLOAT DEFAULT 1.0"),
+        # Company base currency
+        ("company_profile", "base_currency", "VARCHAR DEFAULT 'USD'"),
+        # Customer & line-item discounts
+        ("customers",     "discount_pct",       "FLOAT DEFAULT 0.0"),
+        ("invoice_items", "discount_pct",       "FLOAT DEFAULT 0.0"),
+        ("invoice_items", "discount_excluded",  "BOOLEAN DEFAULT 0"),
+        ("invoice_items", "discount_amount",    "FLOAT DEFAULT 0.0"),
+        # Credit Notes
+        ("credit_notes",      "company_id",    "INTEGER"),
+        # Vendor Bills AP
+        ("vendor_bills",      "company_id",    "INTEGER"),
+        # Quotes
+        ("quotes",            "company_id",    "INTEGER"),
+        # Audit Log
+        ("audit_log",         "company_id",    "INTEGER"),
     ]
     with engine.connect() as conn:
         for table, col, type_def in migrations:
@@ -263,6 +312,13 @@ app.include_router(email_router)
 app.include_router(portal_router)
 app.include_router(superadmin_router)
 app.include_router(warehouse_tasks_router)
+app.include_router(traceability_router)
+app.include_router(asn_router)
+app.include_router(kpi_router)
+app.include_router(credit_notes_router)
+app.include_router(vendor_bills_router)
+app.include_router(quotes_router)
+app.include_router(audit_log_router)
 
 # ── Static files (product images) ─────────────────────────────
 _static_dir = pathlib.Path(__file__).parent / "static" / "products"

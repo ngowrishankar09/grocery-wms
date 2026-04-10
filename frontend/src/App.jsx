@@ -37,6 +37,17 @@ import ForcePasswordChange from './pages/ForcePasswordChange'
 import Register from './pages/Register'
 import Superadmin from './pages/Superadmin'
 import WarehouseTasks from './pages/WarehouseTasks'
+import Traceability from './pages/Traceability'
+import SupplierASN from './pages/SupplierASN'
+import KPIScorecard from './pages/KPIScorecard'
+import CustomerStatement from './pages/CustomerStatement'
+import CreditNotes from './pages/CreditNotes'
+import VendorBills from './pages/VendorBills'
+import Quotes from './pages/Quotes'
+import AuditLog from './pages/AuditLog'
+import ExpiryAlerts from './pages/ExpiryAlerts'
+import BalanceSheet from './pages/BalanceSheet'
+import OnboardingWizard from './pages/OnboardingWizard'
 
 // ── Admin-only route guard ─────────────────────────────────────
 function AdminOnly({ children }) {
@@ -102,6 +113,17 @@ function ProtectedRoutes({ lang, setLang }) {
         <Route path="/users"           element={<AdminOnly><Users /></AdminOnly>} />
         <Route path="/price-lists"     element={<PriceLists />} />
         <Route path="/warehouse-tasks" element={<WarehouseTasks />} />
+        <Route path="/traceability"        element={<Traceability />} />
+        <Route path="/supplier-asn"        element={<SupplierASN />} />
+        <Route path="/kpi-scorecard"       element={<KPIScorecard />} />
+        <Route path="/customer-statements" element={<CustomerStatement />} />
+        <Route path="/credit-notes"        element={<CreditNotes />} />
+        <Route path="/vendor-bills"        element={<VendorBills />} />
+        <Route path="/quotes"              element={<Quotes />} />
+        <Route path="/audit-log"           element={<AuditLog />} />
+        <Route path="/expiry-alerts"       element={<ExpiryAlerts />} />
+        <Route path="/balance-sheet"       element={<BalanceSheet />} />
+        <Route path="/onboarding"          element={<OnboardingWizard />} />
         <Route path="*"                element={<Navigate to="/app" replace />} />
       </Routes>
     </Layout>

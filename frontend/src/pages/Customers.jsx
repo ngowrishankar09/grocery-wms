@@ -123,6 +123,7 @@ const BLANK = {
   name: '', contact_person: '', phone: '', email: '',
   address: '', delivery_address: '', notes: '', is_active: true,
   credit_limit: '', payment_terms: '', credit_hold: false,
+  discount_pct: 0,
 }
 
 function CustomerModal({ customer, onClose, onSaved }) {
@@ -130,6 +131,7 @@ function CustomerModal({ customer, onClose, onSaved }) {
     ...BLANK, ...customer,
     credit_limit: customer.credit_limit ?? '',
     payment_terms: customer.payment_terms ?? '',
+    discount_pct: customer.discount_pct ?? 0,
   } : { ...BLANK })
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState('')
@@ -286,6 +288,37 @@ function CustomerModal({ customer, onClose, onSaved }) {
               />
               <Lock size={13} className="text-red-500" /> Credit hold — block all new order dispatches
             </label>
+          </div>
+
+          {/* Pricing / Discount */}
+          <div className="border-t pt-4">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Pricing</p>
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">
+                Default Invoice Discount %
+                <span className="font-normal text-gray-400 ml-1">(applied to all line items; individual lines can be excluded)</span>
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.5"
+                  className="w-32 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  value={form.discount_pct}
+                  onChange={e => set('discount_pct', parseFloat(e.target.value) || 0)}
+                />
+                <span className="text-sm text-gray-500">%</span>
+                {form.discount_pct > 0 && (
+                  <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-semibold">
+                    {form.discount_pct}% off all items
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-gray-400 mt-1">
+                When creating an invoice for this customer, each line item will default to this discount. You can override or exclude specific lines.
+              </p>
+            </div>
           </div>
 
           <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
@@ -479,11 +512,16 @@ export default function Customers() {
                 {filtered.map(c => (
                   <tr key={c.id} className={`hover:bg-gray-50 transition-colors ${c.credit_hold ? 'bg-red-50/30' : ''}`}>
                     <td className="px-4 py-3">
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-1.5 flex-wrap">
                         <p className="font-semibold text-gray-900">{c.name}</p>
                         {c.credit_hold && (
                           <span className="inline-flex items-center gap-0.5 text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded-full font-semibold">
                             <Lock size={9} /> Hold
+                          </span>
+                        )}
+                        {c.discount_pct > 0 && (
+                          <span className="inline-flex items-center gap-0.5 text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full font-semibold">
+                            {c.discount_pct}% disc
                           </span>
                         )}
                       </div>

@@ -153,8 +153,12 @@ function InvoiceForm({ initial, onClose, onSaved }) {
   const today = new Date().toISOString().split('T')[0]
   const isEdit = !!initial?.id
 
-  const [customers, setCustomers] = useState([])
-  const [skus,      setSkus]      = useState([])
+  const [customers,    setCustomers]    = useState([])
+  const [skus,         setSkus]         = useState([])
+  const [custDiscount, setCustDiscount] = useState(0)  // active customer's default %
+
+  const blankItem = (discPct = 0) => ({ sku_id: '', description: '', cases_qty: 1, unit_price: 0, notes: '', discount_pct: discPct, discount_excluded: false })
+
   const [form, setForm] = useState(() => initial ? {
     customer_id:      initial.customer_id || '',
     store_name:       initial.store_name,
@@ -165,12 +169,20 @@ function InvoiceForm({ initial, onClose, onSaved }) {
     discount_amount:  initial.discount_amount || 0,
     previous_balance: initial.previous_balance || 0,
     taxes: initial.taxes?.length ? initial.taxes.map(t => ({ name: t.name, rate: t.rate })) : [{ name: 'GST', rate: 0 }],
-    items: initial.items.map(i => ({ sku_id: i.sku_id || '', description: i.description, cases_qty: i.cases_qty, unit_price: i.unit_price, notes: i.notes || '' })),
+    items: initial.items.map(i => ({
+      sku_id:           i.sku_id || '',
+      description:      i.description,
+      cases_qty:        i.cases_qty,
+      unit_price:       i.unit_price,
+      notes:            i.notes || '',
+      discount_pct:     i.discount_pct ?? 0,
+      discount_excluded: i.discount_excluded ?? false,
+    })),
   } : {
     customer_id: '', store_name: '', invoice_date: today, due_date: '',
     payment_terms: '', notes: '', discount_amount: 0, previous_balance: 0,
     taxes: [{ name: 'GST', rate: 0 }],
-    items: [{ sku_id: '', description: '', cases_qty: 1, unit_price: 0, notes: '' }],
+    items: [blankItem(0)],
   })
   const [saving, setSaving] = useState(false)
   const [err,    setErr]    = useState('')
@@ -185,7 +197,21 @@ function InvoiceForm({ initial, onClose, onSaved }) {
   const onCustChange = (id) => {
     const c = customers.find(c => c.id === parseInt(id))
     set('customer_id', id)
-    if (c) set('store_name', c.name)
+    if (c) {
+      set('store_name', c.name)
+      const disc = c.discount_pct || 0
+      setCustDiscount(disc)
+      // Apply customer's discount to all items that aren't already excluded
+      setForm(f => ({
+        ...f,
+        customer_id: id,
+        store_name: c.name,
+        items: f.items.map(it => it.discount_excluded ? it : { ...it, discount_pct: disc }),
+      }))
+    } else {
+      setCustDiscount(0)
+      set('customer_id', id)
+    }
   }
 
   const setItem = (idx, k, v) => {
@@ -196,8 +222,12 @@ function InvoiceForm({ initial, onClose, onSaved }) {
         const sku = skus.find(s => s.id === parseInt(v))
         if (sku) {
           items[idx].description = sku.product_name
-          items[idx].unit_price  = sku.cost_price || 0
+          items[idx].unit_price  = sku.selling_price || sku.cost_price || 0
         }
+      }
+      // When toggling discount_excluded ON, reset discount_pct to 0; OFF → restore customer default
+      if (k === 'discount_excluded') {
+        items[idx].discount_pct = v ? 0 : custDiscount
       }
       return { ...f, items }
     })
@@ -211,17 +241,26 @@ function InvoiceForm({ initial, onClose, onSaved }) {
     })
   }
 
-  const addItem = () => setForm(f => ({ ...f, items: [...f.items, { sku_id: '', description: '', cases_qty: 1, unit_price: 0, notes: '' }] }))
+  const addItem   = () => setForm(f => ({ ...f, items: [...f.items, blankItem(custDiscount)] }))
   const removeItem = (idx) => setForm(f => ({ ...f, items: f.items.filter((_, i) => i !== idx) }))
   const addTax    = () => setForm(f => ({ ...f, taxes: [...f.taxes, { name: '', rate: 0 }] }))
   const removeTax = (idx) => setForm(f => ({ ...f, taxes: f.taxes.filter((_, i) => i !== idx) }))
 
-  // Live totals
-  const subtotal    = form.items.reduce((s, it) => s + ((+it.cases_qty || 0) * (+it.unit_price || 0)), 0)
-  const discounted  = subtotal - (+form.discount_amount || 0)
-  const taxTotal    = form.taxes.reduce((s, tx) => s + discounted * ((+tx.rate || 0) / 100), 0)
-  const total       = discounted + taxTotal
-  const grandTotal  = total + (+form.previous_balance || 0)
+  // Live totals — per-line discount aware
+  const lineEffective = (it) => {
+    const raw = (+it.cases_qty || 0) * (+it.unit_price || 0)
+    if (it.discount_excluded || !it.discount_pct) return raw
+    return raw * (1 - (+it.discount_pct) / 100)
+  }
+  const subtotal         = form.items.reduce((s, it) => s + (+it.cases_qty||0)*(+it.unit_price||0), 0)
+  const totalLineDiscs   = form.items.reduce((s, it) => {
+    const raw = (+it.cases_qty||0)*(+it.unit_price||0)
+    return s + (it.discount_excluded || !it.discount_pct ? 0 : raw * (+it.discount_pct)/100)
+  }, 0)
+  const discountedBase   = subtotal - totalLineDiscs - (+form.discount_amount || 0)
+  const taxTotal         = form.taxes.reduce((s, tx) => s + discountedBase * ((+tx.rate||0)/100), 0)
+  const total            = discountedBase + taxTotal
+  const grandTotal       = total + (+form.previous_balance || 0)
 
   const submit = async (e) => {
     e.preventDefault()
@@ -240,11 +279,13 @@ function InvoiceForm({ initial, onClose, onSaved }) {
         previous_balance: parseFloat(form.previous_balance) || 0,
         taxes: form.taxes.filter(t => t.name && +t.rate > 0).map(t => ({ name: t.name, rate: parseFloat(t.rate) })),
         items: form.items.map(it => ({
-          sku_id:      it.sku_id ? parseInt(it.sku_id) : null,
-          description: it.description,
-          cases_qty:   parseInt(it.cases_qty) || 1,
-          unit_price:  parseFloat(it.unit_price) || 0,
-          notes:       it.notes || null,
+          sku_id:            it.sku_id ? parseInt(it.sku_id) : null,
+          description:       it.description,
+          cases_qty:         parseInt(it.cases_qty) || 1,
+          unit_price:        parseFloat(it.unit_price) || 0,
+          notes:             it.notes || null,
+          discount_pct:      parseFloat(it.discount_pct) || 0,
+          discount_excluded: !!it.discount_excluded,
         })),
       }
       const r = isEdit
@@ -276,8 +317,14 @@ function InvoiceForm({ initial, onClose, onSaved }) {
               <select className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 value={form.customer_id} onChange={e => onCustChange(e.target.value)}>
                 <option value="">— Select —</option>
-                {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                {customers.map(c => <option key={c.id} value={c.id}>{c.name}{c.discount_pct > 0 ? ` (${c.discount_pct}% disc)` : ''}</option>)}
               </select>
+              {custDiscount > 0 && (
+                <p className="text-xs text-green-700 mt-1 flex items-center gap-1">
+                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-green-500" />
+                  {custDiscount}% default discount applied to all eligible lines
+                </p>
+              )}
             </div>
             <div>
               <label className="block text-xs font-semibold text-gray-600 mb-1">Store / Bill To *</label>
@@ -316,38 +363,84 @@ function InvoiceForm({ initial, onClose, onSaved }) {
               <span className="text-xs font-semibold text-gray-700">Line Items</span>
               <button type="button" onClick={addItem} className="text-xs text-blue-600 hover:underline font-medium">+ Add Item</button>
             </div>
+            {/* column headers */}
+            <div className="grid gap-1.5 mb-1 text-xs text-gray-400 font-medium px-0.5" style={{gridTemplateColumns:'2fr 0.6fr 0.8fr 0.6fr 0.7fr 1fr auto'}}>
+              <span>Description</span>
+              <span className="text-center">Cases</span>
+              <span className="text-right">Unit $</span>
+              <span className="text-center">Disc %</span>
+              <span className="text-center">Excl.</span>
+              <span className="text-right">Line Total</span>
+              <span />
+            </div>
             <div className="space-y-2">
-              {form.items.map((it, idx) => (
-                <div key={idx} className="space-y-1">
-                  <div className="grid gap-1.5 items-center" style={{gridTemplateColumns:'2fr 1fr 1fr 1fr auto'}}>
-                    <div className="flex gap-1">
-                      <select className="w-24 shrink-0 border border-gray-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        value={it.sku_id} onChange={e => setItem(idx, 'sku_id', e.target.value)}>
-                        <option value="">SKU</option>
-                        {skus.map(s => <option key={s.id} value={s.id}>{s.sku_code}</option>)}
-                      </select>
-                      <input className="flex-1 border border-gray-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        placeholder="Description" value={it.description} onChange={e => setItem(idx, 'description', e.target.value)} required />
+              {form.items.map((it, idx) => {
+                const raw  = (+it.cases_qty||0)*(+it.unit_price||0)
+                const disc = it.discount_excluded || !it.discount_pct ? 0 : raw * (+it.discount_pct)/100
+                const lineTotal = raw - disc
+                return (
+                  <div key={idx} className="space-y-1">
+                    <div className="grid gap-1.5 items-center" style={{gridTemplateColumns:'2fr 0.6fr 0.8fr 0.6fr 0.7fr 1fr auto'}}>
+                      {/* Description + SKU */}
+                      <div className="flex gap-1">
+                        <select className="w-20 shrink-0 border border-gray-200 rounded-lg px-1.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          value={it.sku_id} onChange={e => setItem(idx, 'sku_id', e.target.value)}>
+                          <option value="">SKU</option>
+                          {skus.map(s => <option key={s.id} value={s.id}>{s.sku_code}</option>)}
+                        </select>
+                        <input className="flex-1 border border-gray-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          placeholder="Description" value={it.description} onChange={e => setItem(idx, 'description', e.target.value)} required />
+                      </div>
+                      {/* Cases */}
+                      <input type="number" min="1" className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs text-center focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        placeholder="Qty" value={it.cases_qty} onChange={e => setItem(idx, 'cases_qty', e.target.value)} />
+                      {/* Unit price */}
+                      <input type="number" min="0" step="0.01" className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs text-right focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        placeholder="0.00" value={it.unit_price} onChange={e => setItem(idx, 'unit_price', e.target.value)} />
+                      {/* Discount % */}
+                      <input type="number" min="0" max="100" step="0.5"
+                        disabled={it.discount_excluded}
+                        className={`border rounded-lg px-2 py-1.5 text-xs text-center focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                          it.discount_excluded ? 'bg-gray-100 text-gray-300 border-gray-100 cursor-not-allowed' :
+                          it.discount_pct > 0 ? 'border-green-300 bg-green-50 text-green-700' : 'border-gray-200'
+                        }`}
+                        value={it.discount_excluded ? '' : (it.discount_pct || 0)}
+                        onChange={e => setItem(idx, 'discount_pct', parseFloat(e.target.value) || 0)}
+                      />
+                      {/* Exclude checkbox */}
+                      <div className="flex items-center justify-center">
+                        <label className="flex items-center gap-1 cursor-pointer text-xs text-gray-500 hover:text-red-600">
+                          <input type="checkbox" checked={!!it.discount_excluded}
+                            onChange={e => setItem(idx, 'discount_excluded', e.target.checked)}
+                            className="rounded accent-red-500 w-3.5 h-3.5" />
+                          <span className="text-xs">No disc</span>
+                        </label>
+                      </div>
+                      {/* Line total */}
+                      <div className="text-xs text-right font-medium">
+                        {disc > 0 ? (
+                          <div>
+                            <span className="line-through text-gray-300 mr-1">${raw.toFixed(2)}</span>
+                            <span className="text-green-700">${lineTotal.toFixed(2)}</span>
+                          </div>
+                        ) : (
+                          <span className="text-gray-700">${lineTotal.toFixed(2)}</span>
+                        )}
+                      </div>
+                      {/* Remove */}
+                      {form.items.length > 1 && (
+                        <button type="button" onClick={() => removeItem(idx)} className="text-red-400 hover:text-red-600"><X size={14} /></button>
+                      )}
                     </div>
-                    <input type="number" min="1" className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs text-center focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="Cases" value={it.cases_qty} onChange={e => setItem(idx, 'cases_qty', e.target.value)} />
-                    <input type="number" min="0" step="0.01" className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs text-right focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="Unit $" value={it.unit_price} onChange={e => setItem(idx, 'unit_price', e.target.value)} />
-                    <div className="text-xs text-right font-medium text-gray-700">
-                      ${((+it.cases_qty||0)*(+it.unit_price||0)).toFixed(2)}
-                    </div>
-                    {form.items.length > 1 && (
-                      <button type="button" onClick={() => removeItem(idx)} className="text-red-400 hover:text-red-600"><X size={14} /></button>
-                    )}
+                    <input
+                      className="w-full border border-gray-100 rounded-lg px-2 py-1 text-xs text-gray-500 placeholder-gray-300 focus:outline-none focus:ring-1 focus:ring-blue-400 bg-gray-50"
+                      placeholder="Line note (optional)…"
+                      value={it.notes}
+                      onChange={e => setItem(idx, 'notes', e.target.value)}
+                    />
                   </div>
-                  <input
-                    className="w-full border border-gray-100 rounded-lg px-2 py-1 text-xs text-gray-500 placeholder-gray-300 focus:outline-none focus:ring-1 focus:ring-blue-400 bg-gray-50"
-                    placeholder="Line note (optional — e.g. discount reason, special instruction)…"
-                    value={it.notes}
-                    onChange={e => setItem(idx, 'notes', e.target.value)}
-                  />
-                </div>
-              ))}
+                )
+              })}
             </div>
           </div>
 
@@ -389,14 +482,20 @@ function InvoiceForm({ initial, onClose, onSaved }) {
 
           {/* Live totals */}
           <div className="bg-gray-50 rounded-xl p-4 text-sm space-y-1.5 border border-gray-100">
-            <div className="flex justify-between text-gray-600"><span>Subtotal</span><span className="font-medium">{fmt(subtotal)}</span></div>
+            <div className="flex justify-between text-gray-600"><span>Subtotal (before discounts)</span><span className="font-medium">{fmt(subtotal)}</span></div>
+            {totalLineDiscs > 0 && (
+              <div className="flex justify-between text-green-700">
+                <span>Line-item discounts ({form.items.filter(it => !it.discount_excluded && it.discount_pct > 0).length} items)</span>
+                <span className="font-medium">-{fmt(totalLineDiscs)}</span>
+              </div>
+            )}
             {+form.discount_amount > 0 && (
-              <div className="flex justify-between text-green-700"><span>Discount</span><span className="font-medium">-{fmt(+form.discount_amount)}</span></div>
+              <div className="flex justify-between text-green-700"><span>Additional discount</span><span className="font-medium">-{fmt(+form.discount_amount)}</span></div>
             )}
             {form.taxes.filter(t => t.name && +t.rate > 0).map((tx, i) => (
               <div key={i} className="flex justify-between text-gray-600">
                 <span>{tx.name} ({tx.rate}%)</span>
-                <span className="font-medium">{fmt(discounted * (+tx.rate) / 100)}</span>
+                <span className="font-medium">{fmt(discountedBase * (+tx.rate) / 100)}</span>
               </div>
             ))}
             <div className="flex justify-between font-semibold text-gray-800 border-t border-gray-200 pt-1.5">
@@ -894,15 +993,19 @@ export default function Invoices() {
                               {inv.items.some(it => it.expiry_date) && <th className="pb-2 text-center font-semibold">Best Before</th>}
                               <th className="pb-2 text-center font-semibold">Cases</th>
                               <th className="pb-2 text-right font-semibold">Unit $</th>
+                              {inv.items.some(it => it.discount_pct > 0) && <th className="pb-2 text-center font-semibold">Disc %</th>}
                               <th className="pb-2 text-right font-semibold">Amount</th>
                             </tr>
                           </thead>
                           <tbody>
                             {inv.items.map(it => (
-                              <tr key={it.id} className="border-b border-gray-100">
+                              <tr key={it.id} className={`border-b border-gray-100 ${it.discount_pct > 0 && !it.discount_excluded ? 'bg-green-50/40' : ''}`}>
                                 <td className="py-1.5">
                                   <span className="font-medium text-gray-800">{it.description}</span>
                                   {it.sku_code && <span className="ml-2 text-gray-400">({it.sku_code})</span>}
+                                  {it.discount_excluded && (
+                                    <span className="ml-2 text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full">No discount</span>
+                                  )}
                                   {it.notes && <div className="text-[11px] text-indigo-500 italic mt-0.5">{it.notes}</div>}
                                 </td>
                                 {inv.items.some(i => i.expiry_date) && (
@@ -915,7 +1018,26 @@ export default function Invoices() {
                                 )}
                                 <td className="py-1.5 text-center text-gray-700">{it.cases_qty}</td>
                                 <td className="py-1.5 text-right text-gray-700">{fmt(it.unit_price)}</td>
-                                <td className="py-1.5 text-right font-semibold text-gray-800">{fmt(it.line_total)}</td>
+                                {inv.items.some(i => i.discount_pct > 0) && (
+                                  <td className="py-1.5 text-center">
+                                    {it.discount_excluded
+                                      ? <span className="text-gray-300">—</span>
+                                      : it.discount_pct > 0
+                                        ? <span className="text-xs font-semibold text-green-700">{it.discount_pct}%</span>
+                                        : <span className="text-gray-300">—</span>
+                                    }
+                                  </td>
+                                )}
+                                <td className="py-1.5 text-right font-semibold">
+                                  {it.discount_amount > 0 ? (
+                                    <div>
+                                      <div className="line-through text-gray-300 text-[10px]">{fmt(it.original_line_total || (it.cases_qty * it.unit_price))}</div>
+                                      <div className="text-green-700">{fmt(it.line_total)}</div>
+                                    </div>
+                                  ) : (
+                                    <span className="text-gray-800">{fmt(it.line_total)}</span>
+                                  )}
+                                </td>
                               </tr>
                             ))}
                           </tbody>
@@ -925,8 +1047,14 @@ export default function Invoices() {
                         <div className="flex justify-end">
                           <div className="w-64 text-xs space-y-1">
                             <div className="flex justify-between text-gray-600"><span>Subtotal</span><span>{fmt(inv.subtotal)}</span></div>
+                            {inv.items.some(it => it.discount_amount > 0) && (
+                              <div className="flex justify-between text-green-700">
+                                <span>Line discounts ({inv.items.filter(it => it.discount_amount > 0).length} items)</span>
+                                <span>-{fmt(inv.items.reduce((s, it) => s + (it.discount_amount || 0), 0))}</span>
+                              </div>
+                            )}
                             {inv.discount_amount > 0 && (
-                              <div className="flex justify-between text-green-700"><span>Discount</span><span>-{fmt(inv.discount_amount)}</span></div>
+                              <div className="flex justify-between text-green-700"><span>Additional discount</span><span>-{fmt(inv.discount_amount)}</span></div>
                             )}
                             {(inv.taxes || []).map(tx => (
                               <div key={tx.id} className="flex justify-between text-gray-600">

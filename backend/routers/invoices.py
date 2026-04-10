@@ -40,11 +40,13 @@ class TaxLineIn(BaseModel):
     rate: float # percentage e.g. 10.0
 
 class InvoiceItemIn(BaseModel):
-    sku_id:      Optional[int] = None
-    description: str
-    cases_qty:   int   = 1
-    unit_price:  float = 0.0
-    notes:       Optional[str] = None
+    sku_id:           Optional[int]   = None
+    description:      str
+    cases_qty:        int             = 1
+    unit_price:       float           = 0.0
+    notes:            Optional[str]   = None
+    discount_pct:     Optional[float] = None   # None = inherit from customer; 0 = no discount
+    discount_excluded: bool           = False  # True = this line is exempt from any discount
 
 class InvoiceIn(BaseModel):
     customer_id:      Optional[int]  = None
@@ -81,28 +83,53 @@ class PaymentIn(BaseModel):
 # ── Helpers ───────────────────────────────────────────────────
 
 def _calc(items, taxes, discount_amount, previous_balance):
-    subtotal    = round(sum(i.cases_qty * i.unit_price for i in items), 2)
-    discounted  = round(subtotal - discount_amount, 2)
+    """
+    Per-line discount calculation.
+    Each item may carry .discount_pct and .discount_excluded attributes (defaults 0 / False).
+    discount_amount (legacy flat amount) is still accepted but additive to per-line discounts.
+    """
+    subtotal = 0.0
+    discounted_subtotal = 0.0
+    for i in items:
+        raw = round(i.cases_qty * i.unit_price, 2)
+        subtotal += raw
+        excluded = getattr(i, 'discount_excluded', False) or False
+        pct      = getattr(i, 'discount_pct', 0.0) or 0.0
+        if excluded or pct == 0:
+            discounted_subtotal += raw
+        else:
+            discounted_subtotal += round(raw * (1 - pct / 100), 2)
+    subtotal  = round(subtotal, 2)
+    # Also apply any legacy flat discount on top
+    discounted_subtotal = round(discounted_subtotal - (discount_amount or 0.0), 2)
     tax_amounts = []
     for tx in taxes:
-        amt = round(discounted * tx.rate / 100, 2)
+        amt = round(discounted_subtotal * tx.rate / 100, 2)
         tax_amounts.append(amt)
-    total_tax  = round(sum(tax_amounts), 2)
-    total      = round(discounted + total_tax, 2)
-    grand      = round(total + previous_balance, 2)
+    total_tax = round(sum(tax_amounts), 2)
+    total     = round(discounted_subtotal + total_tax, 2)
+    grand     = round(total + (previous_balance or 0.0), 2)
     return subtotal, total_tax, total, grand, tax_amounts
 
 def _fmt_item(ii: InvoiceItem):
+    raw_total = round((ii.cases_qty or 0) * (ii.unit_price or 0), 2)
+    disc_pct  = getattr(ii, 'discount_pct', 0.0) or 0.0
+    excluded  = getattr(ii, 'discount_excluded', False) or False
+    disc_amt  = getattr(ii, 'discount_amount', 0.0) or 0.0
     return {
-        "id":          ii.id,
-        "sku_id":      ii.sku_id,
-        "sku_code":    ii.sku.sku_code if ii.sku else None,
-        "description": ii.description,
-        "cases_qty":   ii.cases_qty,
-        "unit_price":  ii.unit_price,
-        "line_total":  ii.line_total,
-        "expiry_date": getattr(ii, 'expiry_date', None),
-        "notes":       getattr(ii, 'notes', None),
+        "id":               ii.id,
+        "sku_id":           ii.sku_id,
+        "sku_code":         ii.sku.sku_code if ii.sku else None,
+        "description":      ii.description,
+        "cases_qty":        ii.cases_qty,
+        "unit_price":       ii.unit_price,
+        "original_line_total": raw_total,
+        "discount_pct":     disc_pct,
+        "discount_excluded": excluded,
+        "discount_amount":  disc_amt,
+        "line_total":       ii.line_total,
+        "expiry_date":      getattr(ii, 'expiry_date', None),
+        "notes":            getattr(ii, 'notes', None),
     }
 
 def _fmt_tax(tx: InvoiceTax):
@@ -295,6 +322,11 @@ def _create_invoice_for_order(order, db: Session, company_id: int) -> "Invoice":
     db.add(inv)
     db.flush()
 
+    # Customer's default discount %
+    cust_disc_helper = 0.0
+    if order.customer_id and order.customer:
+        cust_disc_helper = getattr(order.customer, 'discount_pct', 0.0) or 0.0
+
     subtotal = 0.0
     for oi in order.items:
         qty = oi.cases_fulfilled or oi.cases_requested
@@ -306,15 +338,20 @@ def _create_invoice_for_order(order, db: Session, company_id: int) -> "Invoice":
             unit_price = oi.sku.selling_price
         else:
             unit_price = 0.0
-        line_total = round(qty * unit_price, 2)
+        raw_h    = round(qty * unit_price, 2)
+        disc_h   = round(raw_h * cust_disc_helper / 100, 2)
+        line_total = round(raw_h - disc_h, 2)
         subtotal += line_total
-        desc = oi.sku.product_name if oi.sku else f"SKU {oi.sku_id}"
+        desc   = oi.sku.product_name if oi.sku else f"SKU {oi.sku_id}"
         expiry = getattr(oi, "expiry_date_entered", None)
         db.add(InvoiceItem(
             invoice_id=inv.id, sku_id=oi.sku_id,
             description=desc, cases_qty=qty,
             unit_price=unit_price, line_total=line_total,
             expiry_date=expiry, notes=oi.notes,
+            discount_pct=cust_disc_helper,
+            discount_excluded=False,
+            discount_amount=disc_h,
         ))
 
     inv.subtotal   = round(subtotal, 2)
@@ -431,6 +468,11 @@ def invoice_from_order(
     db.add(inv)
     db.flush()
 
+    # Customer's default discount %
+    cust_disc_fo = 0.0
+    if order.customer_id and order.customer:
+        cust_disc_fo = getattr(order.customer, 'discount_pct', 0.0) or 0.0
+
     subtotal = 0.0
     for oi in order.items:
         qty = oi.cases_fulfilled or oi.cases_requested
@@ -443,14 +485,21 @@ def invoice_from_order(
             unit_price = oi.sku.selling_price
         else:
             unit_price = 0.0
-        line_total = round(qty * unit_price, 2)
-        subtotal  += line_total
-        desc = oi.sku.product_name if oi.sku else f"SKU {oi.sku_id}"
+        raw_total_fo = round(qty * unit_price, 2)
+        disc_amt_fo  = round(raw_total_fo * cust_disc_fo / 100, 2)
+        line_total   = round(raw_total_fo - disc_amt_fo, 2)
+        subtotal    += line_total
+        desc   = oi.sku.product_name if oi.sku else f"SKU {oi.sku_id}"
         expiry = getattr(oi, 'expiry_date_entered', None)
-        db.add(InvoiceItem(invoice_id=inv.id, sku_id=oi.sku_id,
-                           description=desc, cases_qty=qty,
-                           unit_price=unit_price, line_total=line_total,
-                           expiry_date=expiry, notes=oi.notes))
+        db.add(InvoiceItem(
+            invoice_id=inv.id, sku_id=oi.sku_id,
+            description=desc, cases_qty=qty,
+            unit_price=unit_price, line_total=line_total,
+            expiry_date=expiry, notes=oi.notes,
+            discount_pct=cust_disc_fo,
+            discount_excluded=False,
+            discount_amount=disc_amt_fo,
+        ))
 
     inv.subtotal  = round(subtotal, 2)
     inv.tax_amount = 0.0
@@ -487,15 +536,36 @@ def create_invoice(
     db.add(inv)
     db.flush()
 
+    # Fetch customer's default discount %
+    cust_disc = 0.0
+    if data.customer_id:
+        cust = db.query(Customer).filter(Customer.id == data.customer_id).first()
+        if cust:
+            cust_disc = getattr(cust, 'discount_pct', 0.0) or 0.0
+
     # Line items
-    class _ItemProxy:
-        def __init__(self, it): self.cases_qty = it.cases_qty; self.unit_price = it.unit_price
     for it in data.items:
-        line = round(it.cases_qty * it.unit_price, 2)
-        db.add(InvoiceItem(invoice_id=inv.id, sku_id=it.sku_id,
-                           description=it.description, cases_qty=it.cases_qty,
-                           unit_price=it.unit_price, line_total=line,
-                           notes=it.notes))
+        # Determine per-line discount: use explicit value if provided, else inherit from customer
+        if it.discount_excluded:
+            line_disc = 0.0
+        elif it.discount_pct is not None:
+            line_disc = it.discount_pct
+        else:
+            line_disc = cust_disc
+
+        raw_total  = round(it.cases_qty * it.unit_price, 2)
+        disc_amt   = round(raw_total * line_disc / 100, 2) if not it.discount_excluded else 0.0
+        line_total = round(raw_total - disc_amt, 2)
+
+        db.add(InvoiceItem(
+            invoice_id=inv.id, sku_id=it.sku_id,
+            description=it.description, cases_qty=it.cases_qty,
+            unit_price=it.unit_price, line_total=line_total,
+            notes=it.notes,
+            discount_pct=line_disc,
+            discount_excluded=it.discount_excluded,
+            discount_amount=disc_amt,
+        ))
     db.flush()
     db.refresh(inv)
 
@@ -514,6 +584,123 @@ def create_invoice(
     db.commit()
     db.refresh(inv)
     return _fmt(inv)
+
+
+@router.get("/statement/{customer_id}")
+def customer_statement(
+    customer_id: int,
+    from_date: Optional[str] = None,
+    to_date: Optional[str] = None,
+    db: Session = Depends(get_db),
+    company_id: int = Depends(get_company_id),
+):
+    """Customer account statement with running balance."""
+    customer = db.query(Customer).filter(Customer.id == customer_id, Customer.company_id == company_id).first()
+    if not customer:
+        raise HTTPException(404, "Customer not found")
+
+    query = db.query(Invoice).filter(
+        Invoice.company_id == company_id,
+        Invoice.customer_id == customer_id,
+        Invoice.status.notin_(["Cancelled"]),
+    )
+    if from_date:
+        query = query.filter(Invoice.invoice_date >= from_date)
+    if to_date:
+        query = query.filter(Invoice.invoice_date <= to_date)
+
+    invoices = query.order_by(Invoice.invoice_date).all()
+    running_balance = 0.0
+    rows = []
+    for inv in invoices:
+        amount_paid = sum(p.amount for p in inv.payments)
+        balance_due = (inv.grand_total or 0) - amount_paid
+        running_balance += balance_due
+        rows.append({
+            "invoice_number":  inv.invoice_number,
+            "invoice_date":    str(inv.invoice_date),
+            "due_date":        str(inv.due_date) if inv.due_date else None,
+            "status":          inv.status,
+            "grand_total":     inv.grand_total,
+            "amount_paid":     round(amount_paid, 2),
+            "balance_due":     round(balance_due, 2),
+            "running_balance": round(running_balance, 2),
+        })
+
+    total_billed = sum(r["grand_total"] or 0 for r in rows)
+    total_paid   = sum(r["amount_paid"] for r in rows)
+    total_outstanding = sum(r["balance_due"] for r in rows)
+
+    return {
+        "customer": {
+            "id":            customer.id,
+            "name":          customer.name,
+            "email":         customer.email,
+            "phone":         customer.phone,
+            "address":       customer.address,
+            "payment_terms": customer.payment_terms,
+        },
+        "from_date": from_date,
+        "to_date":   to_date,
+        "rows":      rows,
+        "summary": {
+            "total_billed":      round(total_billed, 2),
+            "total_paid":        round(total_paid, 2),
+            "total_outstanding": round(total_outstanding, 2),
+        },
+    }
+
+
+@router.post("/send-reminders")
+def send_payment_reminders(
+    db: Session = Depends(get_db),
+    company_id: int = Depends(get_company_id),
+):
+    """Send email reminders for all Overdue invoices that have a customer email."""
+    cp = db.query(CompanyProfile).filter(CompanyProfile.company_id == company_id).first()
+    if not cp or not cp.smtp_host:
+        return {"ok": False, "message": "SMTP not configured", "sent": 0, "skipped": 0}
+
+    overdue = db.query(Invoice).filter(
+        Invoice.company_id == company_id,
+        Invoice.status == "Overdue",
+    ).all()
+
+    sent, skipped = 0, 0
+    for inv in overdue:
+        customer = db.query(Customer).filter(Customer.id == inv.customer_id).first() if inv.customer_id else None
+        email = (customer.email if customer else None)
+        if not email or "@" not in email:
+            skipped += 1
+            continue
+        try:
+            import smtplib
+            from email.mime.text import MIMEText
+            from email.mime.multipart import MIMEMultipart
+            amount_paid = sum(p.amount for p in inv.payments)
+            balance = (inv.grand_total or 0) - amount_paid
+            subject = f"Payment Reminder: Invoice {inv.invoice_number} is Overdue"
+            html = f"""<p>Dear {customer.name if customer else inv.store_name},</p>
+            <p>This is a friendly reminder that invoice <strong>{inv.invoice_number}</strong> for
+            <strong>${balance:.2f}</strong> is now overdue.</p>
+            <p>Invoice Date: {inv.invoice_date}<br>Due Date: {inv.due_date or 'N/A'}</p>
+            <p>Please arrange payment at your earliest convenience.</p>
+            <p>Regards,<br>{cp.name or 'Accounts Team'}</p>"""
+            msg = MIMEMultipart("alternative")
+            msg["Subject"] = subject
+            msg["From"] = cp.smtp_from or cp.smtp_user
+            msg["To"] = email
+            msg.attach(MIMEText(html, "html"))
+            with smtplib.SMTP(cp.smtp_host, cp.smtp_port or 587) as server:
+                server.starttls()
+                if cp.smtp_user and cp.smtp_password:
+                    server.login(cp.smtp_user, cp.smtp_password)
+                server.send_message(msg)
+            sent += 1
+        except Exception:
+            skipped += 1
+
+    return {"ok": True, "sent": sent, "skipped": skipped, "total_overdue": len(overdue)}
 
 
 @router.get("/{invoice_id}")
@@ -557,12 +744,35 @@ def update_invoice(
         for old in list(inv.items):
             db.delete(old)
         db.flush()
+
+        # Fetch customer discount for re-applying on update
+        cust_disc_upd = 0.0
+        if inv.customer_id:
+            cust_upd = db.query(Customer).filter(Customer.id == inv.customer_id).first()
+            if cust_upd:
+                cust_disc_upd = getattr(cust_upd, 'discount_pct', 0.0) or 0.0
+
         for it in data.items:
-            db.add(InvoiceItem(invoice_id=inv.id, sku_id=it.sku_id,
-                               description=it.description, cases_qty=it.cases_qty,
-                               unit_price=it.unit_price,
-                               line_total=round(it.cases_qty * it.unit_price, 2),
-                               notes=it.notes))
+            if it.discount_excluded:
+                line_disc_upd = 0.0
+            elif it.discount_pct is not None:
+                line_disc_upd = it.discount_pct
+            else:
+                line_disc_upd = cust_disc_upd
+
+            raw_upd   = round(it.cases_qty * it.unit_price, 2)
+            disc_a_upd = round(raw_upd * line_disc_upd / 100, 2) if not it.discount_excluded else 0.0
+            line_t_upd = round(raw_upd - disc_a_upd, 2)
+
+            db.add(InvoiceItem(
+                invoice_id=inv.id, sku_id=it.sku_id,
+                description=it.description, cases_qty=it.cases_qty,
+                unit_price=it.unit_price, line_total=line_t_upd,
+                notes=it.notes,
+                discount_pct=line_disc_upd,
+                discount_excluded=it.discount_excluded,
+                discount_amount=disc_a_upd,
+            ))
         db.flush()
         db.refresh(inv)
 

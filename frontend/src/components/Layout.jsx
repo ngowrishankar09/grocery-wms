@@ -8,7 +8,8 @@ import {
   Warehouse, ArrowLeftRight, TrendingUp, Users, Globe, Settings, SendHorizonal,
   Bell, FileText, ClipboardList, X, AlertTriangle, Clock, Archive, ChevronRight,
   LayoutGrid, Table2, BookOpen, MapPin, ShoppingBag, Smartphone, Menu, Store,
-  RotateCcw, Receipt, UserCircle2, LogOut, Shield, Tags, ChevronDown, CheckSquare, BarChart2
+  RotateCcw, Receipt, UserCircle2, LogOut, Shield, Tags, ChevronDown, CheckSquare, BarChart2,
+  GitBranch, FileX, Scale, Activity, CreditCard, DollarSign
 } from 'lucide-react'
 
 const navGroups = (t) => [
@@ -21,10 +22,13 @@ const navGroups = (t) => [
       { to: '/dispatch',       icon: SendHorizonal,   label: 'Dispatch' },
       { to: '/dispatch-board', icon: LayoutGrid,      label: 'Dispatch Board' },
       { to: '/drivers',        icon: UserCircle2,     label: 'Drivers' },
+      { to: '/quotes',         icon: FileText,        label: 'Quotations' },
       { to: '/orders',         icon: ShoppingCart,    label: t('orders') },
       { to: '/transfers',      icon: ArrowLeftRight,  label: t('transfers') },
       { to: '/picking',          icon: Smartphone,      label: 'Mobile Picking' },
       { to: '/warehouse-tasks',  icon: CheckSquare,     label: 'Warehouse Tasks' },
+      { to: '/traceability',     icon: GitBranch,       label: 'Traceability' },
+      { to: '/supplier-asn',     icon: Truck,           label: 'Supplier ASN' },
     ],
   },
   {
@@ -38,24 +42,31 @@ const navGroups = (t) => [
   {
     label: 'Management',
     items: [
-      { to: '/customers',     icon: Store,    label: 'Customers' },
+      { to: '/customers',     icon: Store,     label: 'Customers' },
       { to: '/returns',       icon: RotateCcw, label: 'Returns' },
+      { to: '/credit-notes',  icon: FileX,     label: 'Credit Notes' },
       { to: '/invoices',      icon: Receipt,   label: 'Invoices' },
-      { to: '/finance',       icon: BarChart2, label: 'Finance' },
-      { to: '/price-lists',   icon: Tags,     label: 'Price Lists' },
-      { to: '/skus',          icon: Package,  label: t('skuMaster') },
-      { to: '/vendors',       icon: Users,    label: t('vendors') },
-      { to: '/bin-locations', icon: MapPin,   label: 'Bin Locations' },
-      { to: '/reports',       icon: FileText, label: 'Reports' },
+      { to: '/vendor-bills',  icon: DollarSign, label: 'Vendor Bills' },
+      { to: '/finance',       icon: BarChart2,  label: 'Finance' },
+      { to: '/balance-sheet', icon: Scale,      label: 'Balance Sheet' },
+      { to: '/price-lists',   icon: Tags,      label: 'Price Lists' },
+      { to: '/skus',          icon: Package,   label: t('skuMaster') },
+      { to: '/vendors',       icon: Users,     label: t('vendors') },
+      { to: '/bin-locations',        icon: MapPin,     label: 'Bin Locations' },
+      { to: '/expiry-alerts',        icon: AlertTriangle, label: 'Expiry Alerts' },
+      { to: '/reports',              icon: FileText,   label: 'Reports' },
+      { to: '/kpi-scorecard',        icon: BarChart2,  label: 'KPI Scorecard' },
+      { to: '/customer-statements',  icon: FileText,   label: 'Statements' },
     ],
   },
   {
     label: 'Admin',
     items: [
-      { to: '/users',       icon: Shield,   label: 'Users' },
-      { to: '/spreadsheet', icon: Table2,   label: 'Spreadsheets' },
-      { to: '/quickbooks',  icon: BookOpen, label: 'QuickBooks' },
-      { to: '/settings',    icon: Settings, label: 'Settings' },
+      { to: '/users',       icon: Shield,    label: 'Users' },
+      { to: '/audit-log',   icon: Activity,  label: 'Audit Log' },
+      { to: '/spreadsheet', icon: Table2,    label: 'Spreadsheets' },
+      { to: '/quickbooks',  icon: BookOpen,  label: 'QuickBooks' },
+      { to: '/settings',    icon: Settings,  label: 'Settings' },
     ],
   },
 ]
@@ -218,6 +229,17 @@ const PAGE_TITLES = {
   '/quickbooks': 'QuickBooks',
   '/finance':    'Finance',
   '/settings': 'Settings',
+  '/traceability': 'Traceability',
+  '/supplier-asn': 'Supplier ASN',
+  '/kpi-scorecard': 'KPI Scorecard',
+  '/customer-statements': 'Customer Statements',
+  '/quotes': 'Sales Quotations',
+  '/credit-notes': 'Credit Notes',
+  '/vendor-bills': 'Vendor Bills',
+  '/balance-sheet': 'Balance Sheet',
+  '/expiry-alerts': 'Expiry Alerts',
+  '/audit-log': 'Audit Log',
+  '/onboarding': 'Setup Wizard',
 }
 
 const ROLE_COLORS = {

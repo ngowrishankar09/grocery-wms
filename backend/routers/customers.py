@@ -35,6 +35,7 @@ class CustomerIn(BaseModel):
     credit_limit:     Optional[float] = None   # None = unlimited
     credit_hold:      bool            = False
     payment_terms:    Optional[str]   = None   # e.g. "Net 30"
+    discount_pct:     float           = 0.0    # default invoice line-item discount %
 
 
 class PortalAccessRequest(BaseModel):
@@ -61,6 +62,7 @@ def _fmt(c: Customer, order_count: int = 0, outstanding_balance: float = 0.0):
         "credit_limit":      getattr(c, "credit_limit", None),
         "credit_hold":       getattr(c, "credit_hold", False) or False,
         "payment_terms":     getattr(c, "payment_terms", None),
+        "discount_pct":      getattr(c, "discount_pct", 0.0) or 0.0,
         "outstanding_balance": round(outstanding_balance, 2),
     }
 
