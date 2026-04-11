@@ -31,8 +31,13 @@ from security import hash_password, verify_password
 
 create_tables(engine)
 
-# ── SQLite migrations: add new columns to existing tables ─────
+# ── Column migrations: add new columns to existing tables ──────
+# Rules for PostgreSQL compatibility:
+#   - Use BOOLEAN DEFAULT FALSE / TRUE  (not 0/1)
+#   - Use TIMESTAMP instead of DATETIME
+#   - ADD COLUMN IF NOT EXISTS avoids errors on re-run
 def _migrate():
+    is_postgres = "postgresql" in str(engine.url)
     migrations = [
         ("invoices", "payment_terms",    "VARCHAR"),
         ("invoices", "discount_amount",  "FLOAT DEFAULT 0.0"),
@@ -48,18 +53,18 @@ def _migrate():
         ("company_profile", "smtp_user",     "VARCHAR"),
         ("company_profile", "smtp_password", "VARCHAR"),
         ("company_profile", "smtp_from",     "VARCHAR"),
-        ("customers", "portal_enabled",  "BOOLEAN DEFAULT 0"),
+        ("customers", "portal_enabled",  "BOOLEAN DEFAULT FALSE"),
         ("customers", "portal_password", "VARCHAR"),
-        ("company_profile", "portal_show_price",    "BOOLEAN DEFAULT 1"),
-        ("company_profile", "portal_show_stock",    "BOOLEAN DEFAULT 1"),
-        ("company_profile", "portal_show_invoices", "BOOLEAN DEFAULT 1"),
+        ("company_profile", "portal_show_price",    "BOOLEAN DEFAULT TRUE"),
+        ("company_profile", "portal_show_stock",    "BOOLEAN DEFAULT TRUE"),
+        ("company_profile", "portal_show_invoices", "BOOLEAN DEFAULT TRUE"),
         ("skus", "selling_price", "FLOAT"),
-        ("orders", "picking_queued",     "BOOLEAN DEFAULT 0"),
-        ("orders", "picking_started_at", "DATETIME"),
-        ("orders", "picking_ended_at",   "DATETIME"),
-        ("skus",   "show_goods_date_on_picking", "BOOLEAN DEFAULT 0"),
+        ("orders", "picking_queued",     "BOOLEAN DEFAULT FALSE"),
+        ("orders", "picking_started_at", "TIMESTAMP"),
+        ("orders", "picking_ended_at",   "TIMESTAMP"),
+        ("skus",   "show_goods_date_on_picking", "BOOLEAN DEFAULT FALSE"),
         ("order_items", "cases_picked",         "INTEGER DEFAULT 0"),
-        ("skus",        "require_expiry_entry",  "BOOLEAN DEFAULT 0"),
+        ("skus",        "require_expiry_entry",  "BOOLEAN DEFAULT FALSE"),
         ("order_items", "expiry_date_entered",   "TEXT"),
         ("invoice_items", "expiry_date",         "TEXT"),
         ("company_profile", "invoice_template",  "VARCHAR DEFAULT 'classic'"),
@@ -74,7 +79,7 @@ def _migrate():
         ("company_profile", "rep_name",           "VARCHAR"),
         ("company_profile", "ship_via",           "VARCHAR"),
         ("company_profile", "catalog_url",        "VARCHAR"),
-        ("company_profile", "show_qr_code",       "BOOLEAN DEFAULT 0"),
+        ("company_profile", "show_qr_code",       "BOOLEAN DEFAULT FALSE"),
         ("company_profile", "invoice_title",      "VARCHAR DEFAULT 'Invoice'"),
         ("invoices",        "num_pallets",         "INTEGER"),
         # Multi-tenancy company_id columns
@@ -109,13 +114,13 @@ def _migrate():
         ("inventory", "stock_type", "VARCHAR DEFAULT 'unrestricted'"),
         # Customer credit management
         ("customers", "credit_limit",  "FLOAT"),
-        ("customers", "credit_hold",   "BOOLEAN DEFAULT 0"),
+        ("customers", "credit_hold",   "BOOLEAN DEFAULT FALSE"),
         ("customers", "payment_terms", "VARCHAR"),
         # Batch traceability + recall + landed cost
         ("batches", "po_item_id",           "INTEGER"),
-        ("batches", "is_recalled",          "BOOLEAN DEFAULT 0"),
+        ("batches", "is_recalled",          "BOOLEAN DEFAULT FALSE"),
         ("batches", "recall_reason",        "VARCHAR"),
-        ("batches", "recalled_at",          "DATETIME"),
+        ("batches", "recalled_at",          "TIMESTAMP"),
         ("batches", "landed_cost_per_case", "FLOAT"),
         # SKU floor price
         ("skus", "floor_price", "FLOAT"),
@@ -123,7 +128,7 @@ def _migrate():
         ("purchase_orders", "freight_cost",          "FLOAT DEFAULT 0.0"),
         ("purchase_orders", "duty_cost",             "FLOAT DEFAULT 0.0"),
         ("purchase_orders", "other_cost",            "FLOAT DEFAULT 0.0"),
-        ("purchase_orders", "landed_cost_allocated", "BOOLEAN DEFAULT 0"),
+        ("purchase_orders", "landed_cost_allocated", "BOOLEAN DEFAULT FALSE"),
         ("purchase_orders", "currency",              "VARCHAR DEFAULT 'USD'"),
         ("purchase_orders", "exchange_rate",         "FLOAT DEFAULT 1.0"),
         # PO item landed cost
@@ -133,7 +138,7 @@ def _migrate():
         ("orders", "approval_status", "VARCHAR"),
         ("orders", "approval_note",   "TEXT"),
         ("orders", "approved_by",     "VARCHAR"),
-        ("orders", "approved_at",     "DATETIME"),
+        ("orders", "approved_at",     "TIMESTAMP"),
         ("orders", "promised_date",   "DATE"),
         # Invoice currency
         ("invoices", "currency",       "VARCHAR DEFAULT 'USD'"),
@@ -143,7 +148,7 @@ def _migrate():
         # Customer & line-item discounts
         ("customers",     "discount_pct",       "FLOAT DEFAULT 0.0"),
         ("invoice_items", "discount_pct",       "FLOAT DEFAULT 0.0"),
-        ("invoice_items", "discount_excluded",  "BOOLEAN DEFAULT 0"),
+        ("invoice_items", "discount_excluded",  "BOOLEAN DEFAULT FALSE"),
         ("invoice_items", "discount_amount",    "FLOAT DEFAULT 0.0"),
         # Credit Notes
         ("credit_notes",      "company_id",    "INTEGER"),
@@ -154,13 +159,15 @@ def _migrate():
         # Audit Log
         ("audit_log",         "company_id",    "INTEGER"),
     ]
+    # Use IF NOT EXISTS for PostgreSQL (idempotent); fall back to try/except for SQLite
+    add_col = "ADD COLUMN IF NOT EXISTS" if is_postgres else "ADD COLUMN"
     with engine.connect() as conn:
         for table, col, type_def in migrations:
             try:
-                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {type_def}"))
+                conn.execute(text(f"ALTER TABLE {table} {add_col} {col} {type_def}"))
                 conn.commit()
             except Exception:
-                conn.rollback()  # PostgreSQL: reset aborted transaction so next migration can run
+                conn.rollback()  # SQLite: reset on duplicate column error
 
 _migrate()
 
