@@ -298,18 +298,6 @@ def seed_demo_data():
         db.flush()
         v1, v2, v3 = vendor_objs[0].id, vendor_objs[1].id, vendor_objs[2].id
 
-        # ── Categories ────────────────────────────────────────────
-        from models import Category
-        needed = ["Spices", "Rice", "Dals & Lentils", "Flour & Grains", "Ghee & Oil", "Nuts & Dry Fruits", "Frozen", "Other"]
-        cat_map = {}
-        for name in needed:
-            c = db.query(Category).filter(Category.name == name, Category.company_id == 1).first()
-            if not c:
-                c = Category(name=name, company_id=1)
-                db.add(c)
-                db.flush()
-            cat_map[name] = c
-
         # ── SKUs ──────────────────────────────────────────────────
         skus_data = [
             dict(sku_code="GDLC2",   product_name="GAZAB CHANA DAL 20x2LB",         category="Dals & Lentils",  case_size=20, unit_price=40.00, vendor_id=v1, reorder_point=10, reorder_qty=40, avg_shelf_life_days=730),
@@ -422,8 +410,10 @@ def seed_demo_data():
         db.commit()
         print("[seed_demo_data] ✓ Demo data loaded for company 1")
     except Exception as e:
+        import traceback
         db.rollback()
-        print(f"[seed_demo_data] Warning: {e}")
+        print(f"[seed_demo_data] ERROR: {e}")
+        traceback.print_exc()
     finally:
         db.close()
 
