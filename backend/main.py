@@ -482,28 +482,25 @@ def root():
 
 @app.post("/admin/run-seed")
 def run_seed_endpoint():
-    """Manually trigger seed_demo_data() and return the result. Temp diagnostic."""
+    """Manually trigger seed_demo_data() and return counts + any error."""
     import traceback as _tb
-    db = SessionLocal()
+    result: dict = {}
     try:
-        sku_count  = db.query(SKU).filter(SKU.company_id == 1).count()
-        cust_count = db.query(Customer).filter(Customer.company_id == 1).count()
-        vendor_count = db.query(Vendor).filter(Vendor.company_id == 1).count()
-    finally:
+        db = SessionLocal()
+        result["before"] = {
+            "skus":     db.query(SKU).filter(SKU.company_id == 1).count(),
+            "customers":db.query(Customer).filter(Customer.company_id == 1).count(),
+            "vendors":  db.query(Vendor).filter(Vendor.company_id == 1).count(),
+        }
         db.close()
-
-    result = {"before": {"skus": sku_count, "customers": cust_count, "vendors": vendor_count}}
-    try:
         seed_demo_data()
         db2 = SessionLocal()
-        try:
-            result["after"] = {
-                "skus": db2.query(SKU).filter(SKU.company_id == 1).count(),
-                "customers": db2.query(Customer).filter(Customer.company_id == 1).count(),
-                "vendors": db2.query(Vendor).filter(Vendor.company_id == 1).count(),
-            }
-        finally:
-            db2.close()
+        result["after"] = {
+            "skus":     db2.query(SKU).filter(SKU.company_id == 1).count(),
+            "customers":db2.query(Customer).filter(Customer.company_id == 1).count(),
+            "vendors":  db2.query(Vendor).filter(Vendor.company_id == 1).count(),
+        }
+        db2.close()
         result["status"] = "ok"
     except Exception as e:
         result["status"] = "error"
