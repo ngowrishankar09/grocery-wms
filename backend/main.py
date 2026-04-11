@@ -5,7 +5,11 @@ from sqlalchemy import text
 import os, pathlib
 
 from database import engine, SessionLocal
-from models import create_tables, Warehouse, User, Company, CompanyProfile, WarehouseTask, SupplierASN, CreditNote, VendorBill, Quote, AuditLog
+from models import (
+    create_tables, Warehouse, User, Company, CompanyProfile,
+    WarehouseTask, SupplierASN, CreditNote, VendorBill, Quote, AuditLog,
+    SKU, Vendor, Inventory, Batch, Customer,
+)
 from routers import skus, vendors, receiving, orders, inventory, transfers, forecasting, dashboard, upload, settings, dispatch
 from routers import reports, stock_take, notifications, dispatch_board, spreadsheet, quickbooks, bin_locations, purchase_orders, labels, customers, returns, invoices
 from routers.drivers import router as drivers_router, runs_router
@@ -240,35 +244,192 @@ def seed_warehouses():
 seed_warehouses()
 
 def seed_admin():
+    """Ensure default demo users exist for company_id=1.
+    Uses upsert-style logic so re-runs on every deploy are safe.
+    """
     db = SessionLocal()
     try:
-        if db.query(User).count() == 0:
-            db.add(User(
-                username="admin",
-                hashed_password=hash_password("admin123"),
-                full_name="System Admin",
-                email="admin@wms.local",
-                role="admin",
-            ))
-            db.add(User(
-                username="manager",
-                hashed_password=hash_password("manager123"),
-                full_name="Warehouse Manager",
-                email="manager@wms.local",
-                role="manager",
-            ))
-            db.add(User(
-                username="warehouse",
-                hashed_password=hash_password("warehouse123"),
-                full_name="Warehouse Staff",
-                email="staff@wms.local",
-                role="warehouse",
-            ))
-            db.commit()
+        demo_users = [
+            dict(username="admin",     password="admin123",     full_name="System Admin",       email="admin@wms.local",   role="admin"),
+            dict(username="manager",   password="manager123",   full_name="Warehouse Manager",  email="manager@wms.local", role="manager"),
+            dict(username="warehouse", password="warehouse123", full_name="Warehouse Staff",     email="staff@wms.local",   role="warehouse"),
+        ]
+        for u in demo_users:
+            existing = db.query(User).filter(User.username == u["username"], User.company_id == 1).first()
+            if not existing:
+                db.add(User(
+                    username=u["username"],
+                    hashed_password=hash_password(u["password"]),
+                    full_name=u["full_name"],
+                    email=u["email"],
+                    role=u["role"],
+                    company_id=1,
+                    is_active=True,
+                    must_change_password=False,
+                ))
+        db.commit()
     finally:
         db.close()
 
 seed_admin()
+
+
+def seed_demo_data():
+    """Populate company 1 with demo SKUs, vendors, inventory, and customers
+    if the company has no SKUs yet (safe to run on every deploy).
+    """
+    from datetime import date, timedelta
+    db = SessionLocal()
+    try:
+        if db.query(SKU).filter(SKU.company_id == 1).count() > 0:
+            return  # already seeded
+
+        # ── Vendors ──────────────────────────────────────────────
+        vendors_data = [
+            dict(name="GAZAB Foods Pty Ltd",  contact_person="Raj Kumar",    phone="+61 2 9000 1001", company_id=1),
+            dict(name="Kohinoor Distributors", contact_person="Priya Sharma", phone="+61 2 9000 1002", company_id=1),
+            dict(name="Royal Grain Co.",        contact_person="James Chen",   phone="+61 2 9000 1003", company_id=1),
+        ]
+        vendor_objs = []
+        for v in vendors_data:
+            obj = Vendor(**v)
+            db.add(obj)
+            vendor_objs.append(obj)
+        db.flush()
+        v1, v2, v3 = vendor_objs[0].id, vendor_objs[1].id, vendor_objs[2].id
+
+        # ── Categories ────────────────────────────────────────────
+        from models import Category
+        needed = ["Spices", "Rice", "Dals & Lentils", "Flour & Grains", "Ghee & Oil", "Nuts & Dry Fruits", "Frozen", "Other"]
+        cat_map = {}
+        for name in needed:
+            c = db.query(Category).filter(Category.name == name, Category.company_id == 1).first()
+            if not c:
+                c = Category(name=name, company_id=1)
+                db.add(c)
+                db.flush()
+            cat_map[name] = c
+
+        # ── SKUs ──────────────────────────────────────────────────
+        skus_data = [
+            dict(sku_code="GDLC2",   product_name="GAZAB CHANA DAL 20x2LB",         category="Dals & Lentils",  case_size=20, unit_price=40.00, vendor_id=v1, reorder_point=10, reorder_qty=40, avg_shelf_life_days=730),
+            dict(sku_code="GBPP1",   product_name="GAZAB BLACK PEPPER POWDER 20x100G",category="Spices",          case_size=20, unit_price=35.00, vendor_id=v1, reorder_point=8,  reorder_qty=32, avg_shelf_life_days=365),
+            dict(sku_code="GGMASA",  product_name="GAZAB GARAM MASALA 20x100G",       category="Spices",          case_size=20, unit_price=32.00, vendor_id=v1, reorder_point=8,  reorder_qty=32, avg_shelf_life_days=365),
+            dict(sku_code="GTUR5",   product_name="GAZAB TURMERIC POWDER 20x200G",    category="Spices",          case_size=20, unit_price=28.00, vendor_id=v1, reorder_point=10, reorder_qty=40, avg_shelf_life_days=365),
+            dict(sku_code="GCGH6",   product_name="GAZAB COW GHEE 6x1600G",           category="Ghee & Oil",      case_size=6,  unit_price=95.00, vendor_id=v1, reorder_point=5,  reorder_qty=20, avg_shelf_life_days=540),
+            dict(sku_code="GALM20",  product_name="GAZAB ALMOND 20x200G",             category="Nuts & Dry Fruits",case_size=20,unit_price=85.00, vendor_id=v1, reorder_point=5,  reorder_qty=20, avg_shelf_life_days=365),
+            dict(sku_code="KBAS5",   product_name="KOHINOOR BASMATI RICE 10x5KG",     category="Rice",            case_size=10, unit_price=120.00,vendor_id=v2, reorder_point=15, reorder_qty=60, avg_shelf_life_days=0),
+            dict(sku_code="KBAS25",  product_name="KOHINOOR BASMATI RICE 2x25KG",     category="Rice",            case_size=2,  unit_price=110.00,vendor_id=v2, reorder_point=10, reorder_qty=40, avg_shelf_life_days=0),
+            dict(sku_code="RBAS10",  product_name="ROYAL BASMATI RICE 4x10LB",        category="Rice",            case_size=4,  unit_price=75.00, vendor_id=v3, reorder_point=12, reorder_qty=48, avg_shelf_life_days=0),
+            dict(sku_code="RTOR10",  product_name="ROYAL TOOR DAL 10x2LB",            category="Dals & Lentils",  case_size=10, unit_price=45.00, vendor_id=v3, reorder_point=10, reorder_qty=40, avg_shelf_life_days=730),
+            dict(sku_code="GBESEN",  product_name="GAZAB BESAN 20x1KG",              category="Flour & Grains",  case_size=20, unit_price=30.00, vendor_id=v1, reorder_point=8,  reorder_qty=32, avg_shelf_life_days=365),
+            dict(sku_code="GATTA",   product_name="GAZAB WHEAT ATTA 10x5KG",         category="Flour & Grains",  case_size=10, unit_price=55.00, vendor_id=v1, reorder_point=10, reorder_qty=40, avg_shelf_life_days=180),
+            dict(sku_code="GFROZB",  product_name="GAZAB FROZEN BHINDI 12x400G",     category="Frozen",          case_size=12, unit_price=38.00, vendor_id=v1, reorder_point=6,  reorder_qty=24, avg_shelf_life_days=365),
+            dict(sku_code="GFROZP",  product_name="GAZAB FROZEN PARATHA 12x5PCS",    category="Frozen",          case_size=12, unit_price=42.00, vendor_id=v1, reorder_point=6,  reorder_qty=24, avg_shelf_life_days=365),
+            dict(sku_code="GMUSTAR", product_name="GAZAB MUSTARD SEEDS 20x100G",     category="Spices",          case_size=20, unit_price=22.00, vendor_id=v1, reorder_point=8,  reorder_qty=32, avg_shelf_life_days=730),
+        ]
+        sku_objs = []
+        import re as _re
+        for s in skus_data:
+            sku = SKU(
+                sku_code=s["sku_code"],
+                product_name=s["product_name"],
+                category=s["category"],
+                case_size=s["case_size"],
+                unit_price=s.get("unit_price", 0),
+                vendor_id=s["vendor_id"],
+                reorder_point=s.get("reorder_point", 5),
+                reorder_qty=s.get("reorder_qty", 20),
+                avg_shelf_life_days=s.get("avg_shelf_life_days", 0),
+                company_id=1,
+            )
+            db.add(sku)
+            sku_objs.append(sku)
+        db.flush()
+
+        # ── Ensure WH1/WH2 exist ─────────────────────────────────
+        wh1 = db.query(Warehouse).filter(Warehouse.code == "WH1", Warehouse.company_id == 1).first()
+        wh2 = db.query(Warehouse).filter(Warehouse.code == "WH2", Warehouse.company_id == 1).first()
+        if not wh1:
+            wh1 = Warehouse(code="WH1", name="Main Warehouse",   is_primary=True,  address="Primary Operations", company_id=1)
+            db.add(wh1)
+        if not wh2:
+            wh2 = Warehouse(code="WH2", name="Cold Store / Overflow", is_primary=False, address="Overflow / Receiving", company_id=1)
+            db.add(wh2)
+        db.flush()
+
+        # ── Inventory + Batches ───────────────────────────────────
+        import random as _random
+        _random.seed(42)
+        today = date.today()
+        for sku in sku_objs:
+            for wh_code, wh_id in [("WH1", wh1.code), ("WH2", wh2.code)]:
+                cases = _random.randint(8, 50)
+                inv = Inventory(sku_id=sku.id, warehouse=wh_code, cases_on_hand=cases, company_id=1)
+                db.add(inv)
+                db.flush()
+                received = today - timedelta(days=_random.randint(10, 60))
+                expiry = None
+                has_exp = sku.avg_shelf_life_days and sku.avg_shelf_life_days > 0
+                if has_exp:
+                    expiry = received + timedelta(days=sku.avg_shelf_life_days + _random.randint(-20, 20))
+                batch = Batch(
+                    batch_code=f"BATCH-{sku.sku_code}-{received.strftime('%Y%m%d')}",
+                    sku_id=sku.id,
+                    cases_received=cases,
+                    cases_remaining=cases,
+                    warehouse=wh_code,
+                    received_date=received,
+                    expiry_date=expiry,
+                    has_expiry=bool(has_exp),
+                    supplier_ref=f"PO-DEMO-{_random.randint(1000,9999)}",
+                    company_id=1,
+                )
+                db.add(batch)
+
+        # ── Customers ─────────────────────────────────────────────
+        customers_data = [
+            dict(name="Metro Supermarket",    contact_person="John Smith",    phone="+1 555 100 2000", email="orders@metro.com",    address="123 Main St, Sydney",  discount_pct=5.0),
+            dict(name="Fresh Market Grocery", contact_person="Sarah Lee",     phone="+1 555 100 2001", email="orders@freshmarket.com", address="45 George St, Melbourne", discount_pct=10.0),
+            dict(name="Indo-Asian Foods",     contact_person="Arjun Patel",   phone="+1 555 100 2002", email="arjun@indoasian.com",   address="78 Bridge Rd, Brisbane",  discount_pct=0.0),
+            dict(name="Spice World Retail",   contact_person="Maria Garcia",  phone="+1 555 100 2003", email="maria@spiceworld.com",  address="22 Pacific Hwy, Perth",   discount_pct=7.5),
+            dict(name="Global Grocery Hub",   contact_person="Michael Wong",  phone="+1 555 100 2004", email="mwong@globalgrocery.com", address="99 Queen St, Adelaide", discount_pct=0.0),
+        ]
+        for c in customers_data:
+            db.add(Customer(
+                name=c["name"],
+                contact_person=c.get("contact_person"),
+                phone=c.get("phone"),
+                email=c.get("email"),
+                address=c.get("address"),
+                discount_pct=c.get("discount_pct", 0.0),
+                company_id=1,
+                is_active=True,
+            ))
+
+        # ── Company Profile ───────────────────────────────────────
+        profile = db.query(CompanyProfile).filter(CompanyProfile.company_id == 1).first()
+        if not profile:
+            db.add(CompanyProfile(
+                company_id=1,
+                company_name="RapidDock WMS Demo",
+                address="1 Warehouse Drive, Sydney NSW 2000",
+                phone="+61 2 9000 0001",
+                email="admin@rapiddockwms.com",
+                base_currency="AUD",
+            ))
+
+        db.commit()
+        print("[seed_demo_data] ✓ Demo data loaded for company 1")
+    except Exception as e:
+        db.rollback()
+        print(f"[seed_demo_data] Warning: {e}")
+    finally:
+        db.close()
+
+
+seed_demo_data()
+
 
 app = FastAPI(title="Grocery WMS API", version="1.0.0")
 
