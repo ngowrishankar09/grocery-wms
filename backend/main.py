@@ -336,7 +336,7 @@ def seed_demo_data():
                 product_name=s["product_name"],
                 category=s["category"],
                 case_size=s["case_size"],
-                unit_price=s.get("unit_price", 0),
+                selling_price=s.get("unit_price", 0),
                 vendor_id=s["vendor_id"],
                 reorder_point=s.get("reorder_point", 5),
                 reorder_qty=s.get("reorder_qty", 20),
@@ -412,7 +412,7 @@ def seed_demo_data():
         if not profile:
             db.add(CompanyProfile(
                 company_id=1,
-                company_name="RapidDock WMS Demo",
+                name="RapidDock WMS Demo",
                 address="1 Warehouse Drive, Sydney NSW 2000",
                 phone="+61 2 9000 0001",
                 email="admin@rapiddockwms.com",
