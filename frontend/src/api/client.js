@@ -453,4 +453,12 @@ export const superAdminAPI = {
   rejectCompany:  (id)      => api.post(`/superadmin/companies/${id}/reject`),
 }
 
+// ── Order Check (AI-powered dispatch verification) ────────────
+export const orderCheckAPI = {
+  analyze: (data)    => api.post('/order-check/analyze', data),
+  save:    (data)    => api.post('/order-check/save',    data),
+  history: ()        => api.get('/order-check/history'),
+  get:     (id)      => api.get(`/order-check/history/${id}`),
+}
+
 export default api

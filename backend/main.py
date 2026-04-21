@@ -22,6 +22,7 @@ from routers.portal import router as portal_router
 from routers.warehouse_tasks import router as warehouse_tasks_router
 from routers.traceability import router as traceability_router
 from routers.asn import router as asn_router
+from routers.order_check import router as order_check_router
 from routers.kpi import router as kpi_router
 from routers.credit_notes import router as credit_notes_router
 from routers.vendor_bills import router as vendor_bills_router
@@ -578,6 +579,7 @@ app.include_router(credit_notes_router)
 app.include_router(vendor_bills_router)
 app.include_router(quotes_router)
 app.include_router(audit_log_router)
+app.include_router(order_check_router)
 
 # ── Static files (product images) ─────────────────────────────
 _static_dir = pathlib.Path(__file__).parent / "static" / "products"

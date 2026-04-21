@@ -1012,6 +1012,24 @@ class AuditLog(Base):
     created_at  = Column(DateTime, default=datetime.utcnow, index=True)
 
 
+# ─── Order Check (AI-powered dispatch verification) ───────────
+class OrderCheckRecord(Base):
+    __tablename__ = "order_check_records"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    company_id      = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
+    order_ref       = Column(String,  nullable=True)     # optional ref e.g. order no / customer name
+    checker_name    = Column(String,  nullable=True)
+    order_photo_b64 = Column(Text,    nullable=True)     # base64 of the paper order photo
+    box_photos_b64  = Column(Text,    nullable=True)     # JSON array of base64 box photos
+    items_matched   = Column(Text,    nullable=True)     # JSON — correct picks
+    items_missing   = Column(Text,    nullable=True)     # JSON — in order but not on floor
+    items_extra     = Column(Text,    nullable=True)     # JSON — on floor but NOT in order (wrong pick)
+    items_manual    = Column(Text,    nullable=True)     # JSON — no-box items confirmed manually
+    notes           = Column(Text,    nullable=True)
+    created_at      = Column(DateTime, default=datetime.utcnow, index=True)
+
+
 def get_engine(db_path="./wms.db"):
     import os
     db_url = os.environ.get("DATABASE_URL", "")

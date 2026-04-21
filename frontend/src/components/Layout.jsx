@@ -9,7 +9,7 @@ import {
   Bell, FileText, ClipboardList, X, AlertTriangle, Clock, Archive, ChevronRight,
   LayoutGrid, Table2, BookOpen, MapPin, ShoppingBag, Smartphone, Menu, Store,
   RotateCcw, Receipt, UserCircle2, LogOut, Shield, Tags, ChevronDown, CheckSquare, BarChart2,
-  GitBranch, FileX, Scale, Activity, CreditCard, DollarSign
+  GitBranch, FileX, Scale, Activity, CreditCard, DollarSign, ScanLine
 } from 'lucide-react'
 
 const navGroups = (t) => [
@@ -26,6 +26,7 @@ const navGroups = (t) => [
       { to: '/orders',         icon: ShoppingCart,    label: t('orders') },
       { to: '/transfers',      icon: ArrowLeftRight,  label: t('transfers') },
       { to: '/picking',          icon: Smartphone,      label: 'Mobile Picking' },
+      { to: '/order-check',      icon: ScanLine,        label: 'Order Check' },
       { to: '/warehouse-tasks',  icon: CheckSquare,     label: 'Warehouse Tasks' },
       { to: '/traceability',     icon: GitBranch,       label: 'Traceability' },
       { to: '/supplier-asn',     icon: Truck,           label: 'Supplier ASN' },
@@ -213,6 +214,7 @@ const PAGE_TITLES = {
   '/orders': 'Orders',
   '/transfers': 'Transfers',
   '/picking': 'Mobile Picking',
+  '/order-check': 'Order Check',
   '/forecasting': 'Forecasting',
   '/purchase-orders': 'Purchase Orders',
   '/stock-take': 'Stock Take',
