@@ -377,10 +377,10 @@ export default function OrderCheck() {
     setAnalyzeError(null)
     try {
       const resp = await orderCheckAPI.analyze({
-        order_photo:      orderPhotos[0].base64,
-        order_photo_mime: orderPhotos[0].mime,
-        box_photos:       boxPhotos.map(p => p.base64),
-        box_photos_mime:  boxPhotos.map(p => p.mime),
+        order_photos:      orderPhotos.map(p => p.base64),
+        order_photos_mime: orderPhotos.map(p => p.mime),
+        box_photos:        boxPhotos.map(p => p.base64),
+        box_photos_mime:   boxPhotos.map(p => p.mime),
       })
       setResults(resp.data)
       setStep(3)
@@ -397,7 +397,7 @@ export default function OrderCheck() {
     try {
       const resp = await orderCheckAPI.save({
         order_ref:    orderRef || null,
-        order_photo:  orderPhotos[0].base64,
+        order_photos: orderPhotos.map(p => p.base64),
         box_photos:   boxPhotos.map(p => p.base64),
         matched:      results.matched,
         missing:      results.missing,
@@ -481,8 +481,8 @@ export default function OrderCheck() {
           <div>
             <h3 className="font-bold text-gray-900 text-lg mb-1">📋 Step 1 — Snap the Order Paper</h3>
             <p className="text-sm text-gray-500">
-              Take a clear photo of the sales order / pick list — with picker's highlights visible.
-              The order does NOT need to be in the system.
+              Take a clear photo of each page of the sales order / pick list — with picker's highlights visible.
+              Multi-page orders: take one photo per page (up to 6 pages). The order does NOT need to be in the system.
             </p>
           </div>
 
@@ -500,11 +500,11 @@ export default function OrderCheck() {
 
           <PhotoCapture
             label="Paper Order / Pick Slip"
-            hint="Lay it flat, good lighting, all items visible"
+            hint="Take 1 photo per page — up to 6 pages. Lay flat, good lighting, all items visible."
             photos={orderPhotos}
-            onAdd={(p) => setOrderPhotos([p])}
-            onRemove={() => setOrderPhotos([])}
-            maxPhotos={1}
+            onAdd={(p) => setOrderPhotos(prev => [...prev, p])}
+            onRemove={(i) => setOrderPhotos(prev => prev.filter((_, j) => j !== i))}
+            maxPhotos={6}
           />
 
           <button
@@ -523,18 +523,18 @@ export default function OrderCheck() {
           <div>
             <h3 className="font-bold text-gray-900 text-lg mb-1">📦 Step 2 — Snap the Boxes on Floor</h3>
             <p className="text-sm text-gray-500">
-              Take 1–4 photos of all boxes laid out on the floor. Most boxes facing towards you is ideal.
-              Items without boxes — you'll confirm manually in the next step.
+              Take 1–8 photos of all boxes laid out on the floor. Most boxes facing towards you is ideal.
+              For large orders, use multiple photos to cover all boxes. Items without boxes — you'll confirm manually in the next step.
             </p>
           </div>
 
           <PhotoCapture
             label="Boxes on Floor"
-            hint="Capture all boxes — multiple photos if needed"
+            hint="Capture all boxes — up to 8 photos"
             photos={boxPhotos}
             onAdd={(p) => setBoxPhotos(prev => [...prev, p])}
             onRemove={(i) => setBoxPhotos(prev => prev.filter((_, j) => j !== i))}
-            maxPhotos={4}
+            maxPhotos={8}
           />
 
           {analyzeError && (
@@ -562,8 +562,9 @@ export default function OrderCheck() {
 
           {analyzing && (
             <div className="text-center text-xs text-gray-400 animate-pulse">
-              Reading order paper… scanning box labels… matching items…<br />
-              This takes about 15–20 seconds.
+              Reading {orderPhotos.length > 1 ? `${orderPhotos.length} order pages` : 'order paper'}…
+              scanning {boxPhotos.length} box photo{boxPhotos.length > 1 ? 's' : ''}… matching items…<br />
+              This takes about {10 + (orderPhotos.length + boxPhotos.length) * 5}–{15 + (orderPhotos.length + boxPhotos.length) * 7} seconds.
             </div>
           )}
         </div>

@@ -2,8 +2,8 @@
 Order Check — AI-powered dispatch verification.
 
 Workflow:
-  1. Checker snaps the paper order/pick slip → Claude Vision extracts item list
-  2. Checker snaps boxes on floor (1-4 photos) → Claude Vision reads box labels
+  1. Checker snaps the paper order/pick slip (1–6 pages) → Claude Vision extracts item list
+  2. Checker snaps boxes on floor (1–8 photos) → Claude Vision reads box labels
   3. Claude semantically matches order items vs floor items and returns:
        matched  = correct picks (in order AND on floor)
        missing  = in order but NOT found on floor  → potential short pick
@@ -63,20 +63,27 @@ def _parse_json(text: str, fallback: dict) -> dict:
 # ── Request / Response schemas ────────────────────────────────
 
 class AnalyzeRequest(BaseModel):
-    order_photo:      str            # base64 image data (no data: prefix)
-    order_photo_mime: str = "image/jpeg"
-    box_photos:       List[str]      # list of base64 images
-    box_photos_mime:  List[str] = []
+    # Multi-page support: up to 6 order paper photos
+    order_photos:      List[str] = []   # preferred — list of base64 images
+    order_photos_mime: List[str] = []
+    # Legacy single-photo fields (kept for backward compat)
+    order_photo:       str = ""
+    order_photo_mime:  str = "image/jpeg"
+    # Box photos: up to 8
+    box_photos:        List[str]
+    box_photos_mime:   List[str] = []
 
 class SaveRequest(BaseModel):
-    order_ref:    Optional[str] = None
-    order_photo:  str
-    box_photos:   List[str]
-    matched:      List[dict]
-    missing:      List[dict]
-    extra:        List[dict]
-    manual_items: List[dict] = []
-    notes:        Optional[str] = None
+    order_ref:     Optional[str] = None
+    # Multi-page support
+    order_photos:  List[str] = []   # preferred
+    order_photo:   str = ""         # legacy fallback
+    box_photos:    List[str]
+    matched:       List[dict]
+    missing:       List[dict]
+    extra:         List[dict]
+    manual_items:  List[dict] = []
+    notes:         Optional[str] = None
 
 
 # ── Endpoints ────────────────────────────────────────────────
@@ -94,37 +101,58 @@ async def analyze_order(
     """
     client = _get_client()
 
-    # ── Step 1: Read the paper order ─────────────────────────
-    order_resp = client.messages.create(
-        model=VISION_MODEL,
-        max_tokens=1024,
-        messages=[{
-            "role": "user",
-            "content": [
-                {
-                    "type": "image",
-                    "source": {
-                        "type":       "base64",
-                        "media_type": req.order_photo_mime,
-                        "data":       req.order_photo,
-                    },
-                },
-                {
-                    "type": "text",
-                    "text": (
-                        "This is a warehouse sales order or pick list paper. "
-                        "Extract EVERY product listed — names, item codes/SKU codes, and quantities. "
-                        "Highlighted or ticked items are already picked — include them all. "
-                        "Return ONLY valid JSON, no explanation:\n"
-                        '{"items": [{"name": "product name", "code": "item or SKU code", "qty": number}]}\n'
-                        "Use empty string for code if not visible. Use 1 for qty if not shown."
-                    ),
-                },
-            ],
-        }],
+    # ── Step 1: Read the paper order (one or more pages) ─────
+    # Resolve which photos to process (multi-page or legacy single)
+    all_order_photos = req.order_photos if req.order_photos else (
+        [req.order_photo] if req.order_photo else []
     )
-    order_data  = _parse_json(order_resp.content[0].text, {"items": []})
-    order_items = order_data.get("items", [])
+    all_order_mimes = req.order_photos_mime if req.order_photos_mime else (
+        [req.order_photo_mime] if req.order_photo else []
+    )
+
+    order_items: list = []
+    for page_idx, page_photo in enumerate(all_order_photos):
+        page_mime = all_order_mimes[page_idx] if page_idx < len(all_order_mimes) else "image/jpeg"
+        page_resp = client.messages.create(
+            model=VISION_MODEL,
+            max_tokens=1024,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type":       "base64",
+                            "media_type": page_mime,
+                            "data":       page_photo,
+                        },
+                    },
+                    {
+                        "type": "text",
+                        "text": (
+                            f"This is page {page_idx + 1} of a warehouse sales order or pick list. "
+                            "Extract EVERY product listed — names, item codes/SKU codes, and quantities. "
+                            "Highlighted or ticked items are already picked — include them all. "
+                            "Return ONLY valid JSON, no explanation:\n"
+                            '{"items": [{"name": "product name", "code": "item or SKU code", "qty": number}]}\n'
+                            "Use empty string for code if not visible. Use 1 for qty if not shown."
+                        ),
+                    },
+                ],
+            }],
+        )
+        page_data  = _parse_json(page_resp.content[0].text, {"items": []})
+        order_items.extend(page_data.get("items", []))
+
+    # Deduplicate order items by name+code (merge quantities for same item)
+    merged: dict = {}
+    for item in order_items:
+        key = (item.get("name", "").lower().strip()[:40], item.get("code", "").lower().strip())
+        if key in merged:
+            merged[key]["qty"] = merged[key].get("qty", 1) + item.get("qty", 1)
+        else:
+            merged[key] = dict(item)
+    order_items = list(merged.values())
 
     # ── Step 2: Read box labels from floor photos ─────────────
     floor_items = []
@@ -220,11 +248,15 @@ async def save_order_check(
     company_id: int     = Depends(get_company_id),
 ):
     from models import OrderCheckRecord
+    # Resolve order photos — prefer multi-page list, fall back to legacy single
+    all_order_photos = req.order_photos if req.order_photos else (
+        [req.order_photo] if req.order_photo else []
+    )
     record = OrderCheckRecord(
         company_id      = company_id,
         order_ref       = req.order_ref,
         checker_name    = getattr(user, "full_name", None) or getattr(user, "username", ""),
-        order_photo_b64 = req.order_photo,
+        order_photo_b64 = json.dumps(all_order_photos),   # stored as JSON array
         box_photos_b64  = json.dumps(req.box_photos),
         items_matched   = json.dumps(req.matched),
         items_missing   = json.dumps(req.missing),
@@ -284,12 +316,21 @@ def get_record(
     ).first()
     if not r:
         raise HTTPException(status_code=404, detail="Record not found")
+    # order_photo_b64 may be a JSON array (new) or a raw base64 string (old records)
+    raw_op = r.order_photo_b64 or ""
+    try:
+        parsed_op = json.loads(raw_op)
+        order_photos = parsed_op if isinstance(parsed_op, list) else [parsed_op]
+    except Exception:
+        order_photos = [raw_op] if raw_op else []
+
     return {
         "id":            r.id,
         "order_ref":     r.order_ref,
         "checker_name":  r.checker_name,
         "created_at":    r.created_at.isoformat(),
-        "order_photo":   r.order_photo_b64,
+        "order_photos":  order_photos,
+        "order_photo":   order_photos[0] if order_photos else "",  # legacy compat
         "box_photos":    json.loads(r.box_photos_b64 or "[]"),
         "matched":       json.loads(r.items_matched  or "[]"),
         "missing":       json.loads(r.items_missing  or "[]"),
