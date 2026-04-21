@@ -472,6 +472,63 @@ def seed_demo_data():
 seed_demo_data()
 
 
+def seed_consumption_history():
+    """Idempotent: add 6 months of consumption history for company 1 SKUs.
+    Safe to call on every deploy — skips if records already exist.
+    """
+    from models import MonthlyConsumption as MC_
+    import random as _rng2
+    _rng2.seed(77)
+    db = SessionLocal()
+    try:
+        # Guard: skip if any consumption records already exist for company 1
+        if db.query(MC_).filter(MC_.company_id == 1).count() > 0:
+            print("[seed_consumption] already seeded, skipping")
+            return
+
+        skus = db.query(SKU).filter(SKU.company_id == 1).order_by(SKU.id).all()
+        if not skus:
+            print("[seed_consumption] no SKUs found, skipping")
+            return
+
+        # Baseline monthly dispatch volumes (aligned to seed SKU order by sku_code sort)
+        sku_volumes = {
+            "GDLC2":   45,  "GBPP1":  28,  "GGMASA": 32,  "GTUR5":  35,
+            "GCGH6":   12,  "GALM20": 10,  "KBAS5":  80,  "KBAS25": 25,
+            "RBAS10":  60,  "RTOR10": 40,  "GBESEN": 38,  "GATTA":  55,
+            "GFROZB":  18,  "GFROZP": 22,  "GMUSTAR":20,
+        }
+        today_d = date.today()
+        for sku in skus:
+            base = sku_volumes.get(sku.sku_code, 25)
+            for m_back in range(1, 7):
+                m = today_d.month - m_back
+                y = today_d.year
+                while m < 1:
+                    m += 12
+                    y -= 1
+                dispatched = max(1, int(base * _rng2.uniform(0.85, 1.15)))
+                received   = max(dispatched, int(base * _rng2.uniform(1.0, 1.30)))
+                db.add(MC_(
+                    sku_id=sku.id, year=y, month=m,
+                    cases_dispatched=dispatched,
+                    cases_received=received,
+                    company_id=1,
+                ))
+        db.commit()
+        print(f"[seed_consumption] ✓ Seeded 6 months history for {len(skus)} SKUs")
+    except Exception as e:
+        import traceback
+        db.rollback()
+        print(f"[seed_consumption] ERROR: {e}")
+        traceback.print_exc()
+    finally:
+        db.close()
+
+
+seed_consumption_history()
+
+
 app = FastAPI(title="Grocery WMS API", version="1.0.0")
 
 app.add_middleware(
@@ -545,11 +602,14 @@ def run_seed_endpoint():
         }
         db.close()
         seed_demo_data()
+        seed_consumption_history()
+        from models import MonthlyConsumption as MC_
         db2 = SessionLocal()
         result["after"] = {
-            "skus":     db2.query(SKU).filter(SKU.company_id == 1).count(),
-            "customers":db2.query(Customer).filter(Customer.company_id == 1).count(),
-            "vendors":  db2.query(Vendor).filter(Vendor.company_id == 1).count(),
+            "skus":         db2.query(SKU).filter(SKU.company_id == 1).count(),
+            "customers":    db2.query(Customer).filter(Customer.company_id == 1).count(),
+            "vendors":      db2.query(Vendor).filter(Vendor.company_id == 1).count(),
+            "consumption_months": db2.query(MC_).filter(MC_.company_id == 1).count(),
         }
         db2.close()
         result["status"] = "ok"
