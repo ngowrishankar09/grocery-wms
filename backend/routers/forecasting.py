@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 import sys, os
@@ -94,7 +94,6 @@ def get_forecast(
             })
 
         # Stockout / reorder-point crossing dates (used by the depletion chart)
-        from datetime import timedelta
         if daily_rate > 0:
             days_to_stockout  = int(total / daily_rate)
             days_to_reorder_pt = max(0, int((total - sku.reorder_point) / daily_rate))
