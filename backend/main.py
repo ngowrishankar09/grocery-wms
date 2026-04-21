@@ -253,7 +253,7 @@ seed_warehouses()
 
 def seed_admin():
     """Ensure default demo users exist for company_id=1.
-    Uses upsert-style logic so re-runs on every deploy are safe.
+    Always resets password + active status so login never breaks after redeploy.
     """
     db = SessionLocal()
     try:
@@ -275,6 +275,11 @@ def seed_admin():
                     is_active=True,
                     must_change_password=False,
                 ))
+            else:
+                # Always keep demo passwords correct and account active
+                existing.hashed_password = hash_password(u["password"])
+                existing.is_active = True
+                existing.must_change_password = False
         db.commit()
     finally:
         db.close()
