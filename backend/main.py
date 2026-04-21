@@ -414,6 +414,50 @@ def seed_demo_data():
                 base_currency="AUD",
             ))
 
+        # ── 6 months consumption history ──────────────────────────
+        # Realistic monthly dispatch volumes aligned to the 15 SKUs (same order as skus_data)
+        # Format: (base_dispatch, dispatch_variance, base_received_ratio)
+        from models import MonthlyConsumption as MC_
+        import random as _rng
+        _rng.seed(77)
+        base_volumes = [
+            45,   # GDLC2   Chana Dal
+            28,   # GBPP1   Black Pepper Powder
+            32,   # GGMASA  Garam Masala
+            35,   # GTUR5   Turmeric Powder
+            12,   # GCGH6   Cow Ghee
+            10,   # GALM20  Almond
+            80,   # KBAS5   Kohinoor Basmati 10x5KG
+            25,   # KBAS25  Kohinoor Basmati 2x25KG
+            60,   # RBAS10  Royal Basmati
+            40,   # RTOR10  Royal Toor Dal
+            38,   # GBESEN  Besan
+            55,   # GATTA   Wheat Atta
+            18,   # GFROZB  Frozen Bhindi
+            22,   # GFROZP  Frozen Paratha
+            20,   # GMUSTAR Mustard Seeds
+        ]
+        today_date = date.today()
+        for idx, sku in enumerate(sku_objs):
+            base = base_volumes[idx]
+            for m_back in range(1, 7):          # 6 months of history
+                m = today_date.month - m_back
+                y = today_date.year
+                while m < 1:
+                    m += 12
+                    y -= 1
+                # slight month-to-month variance ±15%
+                dispatched = max(1, int(base * _rng.uniform(0.85, 1.15)))
+                received   = max(dispatched, int(base * _rng.uniform(1.0, 1.30)))
+                db.add(MC_(
+                    sku_id=sku.id,
+                    year=y,
+                    month=m,
+                    cases_dispatched=dispatched,
+                    cases_received=received,
+                    company_id=1,
+                ))
+
         db.commit()
         print("[seed_demo_data] ✓ Demo data loaded for company 1")
     except Exception as e:

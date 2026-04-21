@@ -93,6 +93,17 @@ def get_forecast(
                 "projected_cases": round(avg_monthly),
             })
 
+        # Stockout / reorder-point crossing dates (used by the depletion chart)
+        from datetime import timedelta
+        if daily_rate > 0:
+            days_to_stockout  = int(total / daily_rate)
+            days_to_reorder_pt = max(0, int((total - sku.reorder_point) / daily_rate))
+            stockout_date   = (today + timedelta(days=days_to_stockout)).isoformat()
+            reorder_pt_date = (today + timedelta(days=days_to_reorder_pt)).isoformat()
+        else:
+            stockout_date   = None
+            reorder_pt_date = None
+
         results.append({
             "sku_id":    sku.id,
             "sku_code":  sku.sku_code,
@@ -107,6 +118,8 @@ def get_forecast(
             "daily_rate": round(daily_rate, 2),
             "days_of_stock": round(days_of_stock, 0) if days_of_stock < 999 else None,
             "days_until_reorder": round(days_until_reorder, 0),
+            "stockout_date":    stockout_date,
+            "reorder_pt_date":  reorder_pt_date,
             "reorder_point": sku.reorder_point,
             "suggested_reorder_qty": suggested_qty,
             "lead_time_days": sku.lead_time_days,
