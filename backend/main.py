@@ -483,6 +483,7 @@ def seed_consumption_history():
     Safe to call on every deploy — skips if records already exist.
     """
     from models import MonthlyConsumption as MC_
+    from datetime import date
     import random as _rng2
     _rng2.seed(77)
     db = SessionLocal()
