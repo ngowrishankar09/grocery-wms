@@ -11,7 +11,7 @@ Workflow:
   4. Checker manually confirms no-box items, adds notes, saves audit record
 """
 
-import os, json
+import os, json, asyncio
 from datetime import datetime
 from typing import List, Optional
 
@@ -30,7 +30,7 @@ ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 VISION_MODEL = "claude-3-5-haiku-20241022"
 
 
-def _get_client():
+def _get_async_client():
     if not ANTHROPIC_API_KEY:
         raise HTTPException(
             status_code=503,
@@ -38,7 +38,7 @@ def _get_client():
                    "Add it to the Render environment variables to enable Order Check.",
         )
     import anthropic
-    return anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    return anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
 
 
 def _parse_json(text: str, fallback: dict) -> dict:
@@ -95,14 +95,16 @@ async def analyze_order(
     company_id: int     = Depends(get_company_id),
 ):
     """
-    Step 1: Extract items from paper order photo.
-    Step 2: Extract items visible on box photos.
-    Step 3: Semantic match — returns matched / missing / extra.
-    """
-    client = _get_client()
+    All Claude Vision calls run in parallel (asyncio.gather) to stay well
+    within Render's 30-second HTTP timeout even for multi-page orders.
 
-    # ── Step 1: Read the paper order (one or more pages) ─────
-    # Resolve which photos to process (multi-page or legacy single)
+    Step 1: Extract items from all order paper pages — concurrently.
+    Step 2: Extract items from all box photos — concurrently.
+    Step 3: Semantic match (single call after Steps 1+2 finish).
+    """
+    client = _get_async_client()
+
+    # ── Resolve photos ────────────────────────────────────────
     all_order_photos = req.order_photos if req.order_photos else (
         [req.order_photo] if req.order_photo else []
     )
@@ -110,10 +112,10 @@ async def analyze_order(
         [req.order_photo_mime] if req.order_photo else []
     )
 
-    order_items: list = []
-    for page_idx, page_photo in enumerate(all_order_photos):
-        page_mime = all_order_mimes[page_idx] if page_idx < len(all_order_mimes) else "image/jpeg"
-        page_resp = client.messages.create(
+    # ── Helper coroutines ─────────────────────────────────────
+
+    async def read_order_page(photo: str, mime: str, page_idx: int) -> list:
+        resp = await client.messages.create(
             model=VISION_MODEL,
             max_tokens=1024,
             messages=[{
@@ -121,11 +123,7 @@ async def analyze_order(
                 "content": [
                     {
                         "type": "image",
-                        "source": {
-                            "type":       "base64",
-                            "media_type": page_mime,
-                            "data":       page_photo,
-                        },
+                        "source": {"type": "base64", "media_type": mime, "data": photo},
                     },
                     {
                         "type": "text",
@@ -141,24 +139,10 @@ async def analyze_order(
                 ],
             }],
         )
-        page_data  = _parse_json(page_resp.content[0].text, {"items": []})
-        order_items.extend(page_data.get("items", []))
+        return _parse_json(resp.content[0].text, {"items": []}).get("items", [])
 
-    # Deduplicate order items by name+code (merge quantities for same item)
-    merged: dict = {}
-    for item in order_items:
-        key = (item.get("name", "").lower().strip()[:40], item.get("code", "").lower().strip())
-        if key in merged:
-            merged[key]["qty"] = merged[key].get("qty", 1) + item.get("qty", 1)
-        else:
-            merged[key] = dict(item)
-    order_items = list(merged.values())
-
-    # ── Step 2: Read box labels from floor photos ─────────────
-    floor_items = []
-    for i, photo in enumerate(req.box_photos):
-        mime = req.box_photos_mime[i] if i < len(req.box_photos_mime) else "image/jpeg"
-        box_resp = client.messages.create(
+    async def read_box_photo(photo: str, mime: str) -> list:
+        resp = await client.messages.create(
             model=VISION_MODEL,
             max_tokens=1024,
             messages=[{
@@ -166,11 +150,7 @@ async def analyze_order(
                 "content": [
                     {
                         "type": "image",
-                        "source": {
-                            "type":       "base64",
-                            "media_type": mime,
-                            "data":       photo,
-                        },
+                        "source": {"type": "base64", "media_type": mime, "data": photo},
                     },
                     {
                         "type": "text",
@@ -189,20 +169,55 @@ async def analyze_order(
                 ],
             }],
         )
-        box_data = _parse_json(box_resp.content[0].text, {"items": []})
-        floor_items.extend(box_data.get("items", []))
+        return _parse_json(resp.content[0].text, {"items": []}).get("items", [])
 
-    # ── Step 3: Semantic matching ─────────────────────────────
-    # Deduplicate floor items by name (rough)
-    seen = set()
-    unique_floor = []
-    for fi in floor_items:
+    # ── Steps 1 + 2: Run ALL vision calls in parallel ─────────
+    order_tasks = [
+        read_order_page(
+            photo,
+            all_order_mimes[i] if i < len(all_order_mimes) else "image/jpeg",
+            i,
+        )
+        for i, photo in enumerate(all_order_photos)
+    ]
+    box_tasks = [
+        read_box_photo(
+            photo,
+            req.box_photos_mime[i] if i < len(req.box_photos_mime) else "image/jpeg",
+        )
+        for i, photo in enumerate(req.box_photos)
+    ]
+
+    all_results = await asyncio.gather(*order_tasks, *box_tasks)
+
+    # Split results back into order pages vs box photos
+    n_order = len(order_tasks)
+    page_results = all_results[:n_order]
+    box_results  = all_results[n_order:]
+
+    # Flatten + deduplicate order items (merge qty for same name+code)
+    raw_order_items = [item for page in page_results for item in page]
+    merged: dict = {}
+    for item in raw_order_items:
+        key = (item.get("name", "").lower().strip()[:40], item.get("code", "").lower().strip())
+        if key in merged:
+            merged[key]["qty"] = merged[key].get("qty", 1) + item.get("qty", 1)
+        else:
+            merged[key] = dict(item)
+    order_items = list(merged.values())
+
+    # Flatten + deduplicate floor items
+    raw_floor = [item for box in box_results for item in box]
+    seen: set = set()
+    unique_floor: list = []
+    for fi in raw_floor:
         key = fi.get("name", "").lower()[:30]
         if key and key not in seen:
             seen.add(key)
             unique_floor.append(fi)
 
-    match_resp = client.messages.create(
+    # ── Step 3: Semantic matching ─────────────────────────────
+    match_resp = await client.messages.create(
         model=VISION_MODEL,
         max_tokens=2048,
         messages=[{
