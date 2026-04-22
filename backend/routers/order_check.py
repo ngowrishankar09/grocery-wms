@@ -62,6 +62,12 @@ def _parse_json(text: str, fallback: dict) -> dict:
 
 # ── Request / Response schemas ────────────────────────────────
 
+class ScanPageRequest(BaseModel):
+    """Single-page quick scan — used by Step 1 live preview."""
+    photo:    str
+    mime:     str = "image/jpeg"
+    page_num: int = 1
+
 class AnalyzeRequest(BaseModel):
     # Multi-page support: up to 6 order paper photos
     order_photos:      List[str] = []   # preferred — list of base64 images
@@ -69,6 +75,8 @@ class AnalyzeRequest(BaseModel):
     # Legacy single-photo fields (kept for backward compat)
     order_photo:       str = ""
     order_photo_mime:  str = "image/jpeg"
+    # Pre-extracted order items (from live Step-1 scans) — skip re-scanning if provided
+    order_items_prefetched: List[dict] = []
     # Box photos: up to 8
     box_photos:        List[str]
     box_photos_mime:   List[str] = []
@@ -88,6 +96,46 @@ class SaveRequest(BaseModel):
 
 # ── Endpoints ────────────────────────────────────────────────
 
+@router.post("/scan-order-page")
+async def scan_order_page(
+    req:        ScanPageRequest,
+    db:         Session = Depends(get_db),
+    company_id: int     = Depends(get_company_id),
+):
+    """
+    Instantly extract items from a single order paper photo.
+    Called by the frontend as each page photo is added in Step 1,
+    so the user can verify the item list before proceeding to box photos.
+    """
+    client = _get_async_client()
+    resp = await client.messages.create(
+        model=VISION_MODEL,
+        max_tokens=1024,
+        messages=[{
+            "role": "user",
+            "content": [
+                {
+                    "type": "image",
+                    "source": {"type": "base64", "media_type": req.mime, "data": req.photo},
+                },
+                {
+                    "type": "text",
+                    "text": (
+                        f"This is page {req.page_num} of a warehouse sales order or pick list. "
+                        "Extract EVERY product listed — names, item codes/SKU codes, and quantities. "
+                        "Highlighted or ticked items are already picked — include them all. "
+                        "Return ONLY valid JSON, no explanation:\n"
+                        '{"items": [{"name": "product name", "code": "item or SKU code", "qty": number}]}\n'
+                        "Use empty string for code if not visible. Use 1 for qty if not shown."
+                    ),
+                },
+            ],
+        }],
+    )
+    items = _parse_json(resp.content[0].text, {"items": []}).get("items", [])
+    return {"items": items, "page_num": req.page_num}
+
+
 @router.post("/analyze")
 async def analyze_order(
     req: AnalyzeRequest,
@@ -103,14 +151,6 @@ async def analyze_order(
     Step 3: Semantic match (single call after Steps 1+2 finish).
     """
     client = _get_async_client()
-
-    # ── Resolve photos ────────────────────────────────────────
-    all_order_photos = req.order_photos if req.order_photos else (
-        [req.order_photo] if req.order_photo else []
-    )
-    all_order_mimes = req.order_photos_mime if req.order_photos_mime else (
-        [req.order_photo_mime] if req.order_photo else []
-    )
 
     # ── Helper coroutines ─────────────────────────────────────
 
@@ -171,40 +211,56 @@ async def analyze_order(
         )
         return _parse_json(resp.content[0].text, {"items": []}).get("items", [])
 
-    # ── Steps 1 + 2: Run ALL vision calls in parallel ─────────
-    order_tasks = [
-        read_order_page(
-            photo,
-            all_order_mimes[i] if i < len(all_order_mimes) else "image/jpeg",
-            i,
+    # ── Step 1: Order items — use prefetched or scan in parallel ─
+    if req.order_items_prefetched:
+        # Fast path: client already scanned each page live — reuse those items
+        order_items = req.order_items_prefetched
+        box_tasks = [
+            read_box_photo(
+                photo,
+                req.box_photos_mime[i] if i < len(req.box_photos_mime) else "image/jpeg",
+            )
+            for i, photo in enumerate(req.box_photos)
+        ]
+        box_results = await asyncio.gather(*box_tasks)
+    else:
+        # Slow path: scan order pages + box photos all in parallel
+        all_order_photos = req.order_photos if req.order_photos else (
+            [req.order_photo] if req.order_photo else []
         )
-        for i, photo in enumerate(all_order_photos)
-    ]
-    box_tasks = [
-        read_box_photo(
-            photo,
-            req.box_photos_mime[i] if i < len(req.box_photos_mime) else "image/jpeg",
+        all_order_mimes = req.order_photos_mime if req.order_photos_mime else (
+            [req.order_photo_mime] if req.order_photo else []
         )
-        for i, photo in enumerate(req.box_photos)
-    ]
+        order_tasks = [
+            read_order_page(
+                photo,
+                all_order_mimes[i] if i < len(all_order_mimes) else "image/jpeg",
+                i,
+            )
+            for i, photo in enumerate(all_order_photos)
+        ]
+        box_tasks = [
+            read_box_photo(
+                photo,
+                req.box_photos_mime[i] if i < len(req.box_photos_mime) else "image/jpeg",
+            )
+            for i, photo in enumerate(req.box_photos)
+        ]
+        all_results  = await asyncio.gather(*order_tasks, *box_tasks)
+        n_order      = len(order_tasks)
+        page_results = all_results[:n_order]
+        box_results  = all_results[n_order:]
 
-    all_results = await asyncio.gather(*order_tasks, *box_tasks)
-
-    # Split results back into order pages vs box photos
-    n_order = len(order_tasks)
-    page_results = all_results[:n_order]
-    box_results  = all_results[n_order:]
-
-    # Flatten + deduplicate order items (merge qty for same name+code)
-    raw_order_items = [item for page in page_results for item in page]
-    merged: dict = {}
-    for item in raw_order_items:
-        key = (item.get("name", "").lower().strip()[:40], item.get("code", "").lower().strip())
-        if key in merged:
-            merged[key]["qty"] = merged[key].get("qty", 1) + item.get("qty", 1)
-        else:
-            merged[key] = dict(item)
-    order_items = list(merged.values())
+        # Flatten + deduplicate order items (merge qty for same name+code)
+        raw_order_items = [item for page in page_results for item in page]
+        merged: dict = {}
+        for item in raw_order_items:
+            key = (item.get("name", "").lower().strip()[:40], item.get("code", "").lower().strip())
+            if key in merged:
+                merged[key]["qty"] = merged[key].get("qty", 1) + item.get("qty", 1)
+            else:
+                merged[key] = dict(item)
+        order_items = list(merged.values())
 
     # Flatten + deduplicate floor items
     raw_floor = [item for box in box_results for item in box]

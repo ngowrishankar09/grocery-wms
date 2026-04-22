@@ -455,11 +455,13 @@ export const superAdminAPI = {
 
 // ── Order Check (AI-powered dispatch verification) ────────────
 export const orderCheckAPI = {
-  // 120-second timeout — multiple parallel Claude Vision calls can take ~20-40s
-  analyze: (data)    => api.post('/order-check/analyze', data, { timeout: 120_000 }),
-  save:    (data)    => api.post('/order-check/save',    data),
-  history: ()        => api.get('/order-check/history'),
-  get:     (id)      => api.get(`/order-check/history/${id}`),
+  // Scan a single order page immediately on upload (Step 1 live preview)
+  scanPage: (data)   => api.post('/order-check/scan-order-page', data, { timeout: 30_000 }),
+  // 120-second timeout — parallel Claude Vision calls for box photos + matching
+  analyze:  (data)   => api.post('/order-check/analyze', data, { timeout: 120_000 }),
+  save:     (data)   => api.post('/order-check/save',    data),
+  history:  ()       => api.get('/order-check/history'),
+  get:      (id)     => api.get(`/order-check/history/${id}`),
 }
 
 export default api

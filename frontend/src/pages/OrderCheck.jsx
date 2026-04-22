@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useMemo } from 'react'
 import { orderCheckAPI } from '../api/client'
 import {
   Camera, CheckCircle2, XCircle, AlertTriangle, Package,
@@ -350,9 +350,13 @@ export default function OrderCheck() {
   const [view, setView]             = useState('main')  // main | check | history
   const [step, setStep]             = useState(1)       // 1=order photo, 2=box photos, 3=results, 4=done
 
-  // Photos
-  const [orderPhotos, setOrderPhotos] = useState([])
-  const [boxPhotos,   setBoxPhotos]   = useState([])
+  // Photos + live scan results
+  // orderPhotos entries: { base64, mime, preview, id }
+  const [orderPhotos,      setOrderPhotos]      = useState([])
+  // orderScanResults: { [photoId]: { status: 'scanning'|'done'|'error', items, error } }
+  const [orderScanResults, setOrderScanResults] = useState({})
+  const [boxPhotos,        setBoxPhotos]        = useState([])
+  const orderInputRef = useRef()
 
   // Analysis results
   const [analyzing, setAnalyzing]   = useState(false)
@@ -367,20 +371,84 @@ export default function OrderCheck() {
   const [savedId, setSavedId]         = useState(null)
 
   const reset = () => {
-    setStep(1); setOrderPhotos([]); setBoxPhotos([])
+    setStep(1); setOrderPhotos([]); setOrderScanResults({}); setBoxPhotos([])
     setResults(null); setAnalyzeError(null)
     setManualItems([]); setNotes(''); setOrderRef(''); setSavedId(null)
   }
+
+  // ── Per-page live scanning ────────────────────────────────
+
+  /** Add an order page photo and immediately scan it. */
+  const handleAddOrderPhoto = useCallback(async (file) => {
+    const { base64, mime } = await compressImage(file)
+    const preview = URL.createObjectURL(file)
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+    const photo = { base64, mime, preview, id }
+
+    setOrderPhotos(prev => [...prev, photo])
+    setOrderScanResults(prev => ({ ...prev, [id]: { status: 'scanning', items: [], error: null } }))
+
+    // Kick off background scan — page_num is approximate (used only for prompt context)
+    setOrderPhotos(prev => {
+      const pageNum = prev.length  // prev already includes the new photo
+      orderCheckAPI.scanPage({ photo: base64, mime, page_num: pageNum })
+        .then(resp => {
+          setOrderScanResults(p => ({ ...p, [id]: { status: 'done', items: resp.data.items, error: null } }))
+        })
+        .catch(err => {
+          const msg = err?.response?.data?.detail || err.message || 'Scan failed'
+          setOrderScanResults(p => ({ ...p, [id]: { status: 'error', items: [], error: msg } }))
+        })
+      return prev  // no state change, just side-effect
+    })
+  }, [])
+
+  const handleOrderPhotoFiles = useCallback(async (e) => {
+    const files = Array.from(e.target.files)
+    for (const f of files) {
+      if (orderPhotos.length >= 6) break
+      await handleAddOrderPhoto(f)
+    }
+    e.target.value = ''
+  }, [orderPhotos.length, handleAddOrderPhoto])
+
+  const handleRemoveOrderPhoto = useCallback((i) => {
+    setOrderPhotos(prev => {
+      const id = prev[i]?.id
+      if (id) setOrderScanResults(p => { const n = { ...p }; delete n[id]; return n })
+      return prev.filter((_, j) => j !== i)
+    })
+  }, [])
+
+  /** Consolidated deduplicated items from all completed scans. */
+  const allOrderItems = useMemo(() => {
+    const flat = orderPhotos.flatMap(p => orderScanResults[p.id]?.items || [])
+    const merged = {}
+    for (const item of flat) {
+      const key = `${(item.name || '').toLowerCase().trim().slice(0, 40)}|${(item.code || '').toLowerCase().trim()}`
+      if (merged[key]) merged[key] = { ...merged[key], qty: (merged[key].qty || 1) + (item.qty || 1) }
+      else merged[key] = { ...item }
+    }
+    return Object.values(merged)
+  }, [orderPhotos, orderScanResults])
+
+  const allScansComplete =
+    orderPhotos.length > 0 &&
+    orderPhotos.every(p => {
+      const s = orderScanResults[p.id]
+      return s && (s.status === 'done' || s.status === 'error')
+    })
 
   const analyze = async () => {
     setAnalyzing(true)
     setAnalyzeError(null)
     try {
       const resp = await orderCheckAPI.analyze({
-        order_photos:      orderPhotos.map(p => p.base64),
-        order_photos_mime: orderPhotos.map(p => p.mime),
-        box_photos:        boxPhotos.map(p => p.base64),
-        box_photos_mime:   boxPhotos.map(p => p.mime),
+        order_photos:           orderPhotos.map(p => p.base64),
+        order_photos_mime:      orderPhotos.map(p => p.mime),
+        order_items_prefetched: allOrderItems,   // skip re-scanning — already done in Step 1
+        box_photos:             boxPhotos.map(p => p.base64),
+        box_photos_mime:        boxPhotos.map(p => p.mime),
       })
       setResults(resp.data)
       setStep(3)
@@ -475,14 +543,14 @@ export default function OrderCheck() {
         ))}
       </div>
 
-      {/* ── STEP 1: Order paper photo ── */}
+      {/* ── STEP 1: Order paper photos — live scanning ── */}
       {step === 1 && (
         <div className="card space-y-5">
           <div>
             <h3 className="font-bold text-gray-900 text-lg mb-1">📋 Step 1 — Snap the Order Paper</h3>
             <p className="text-sm text-gray-500">
-              Take a clear photo of each page of the sales order / pick list — with picker's highlights visible.
-              Multi-page orders: take one photo per page (up to 6 pages). The order does NOT need to be in the system.
+              Take one photo per page of the sales order / pick slip — AI reads the items
+              instantly as you upload. Multi-page orders supported (up to 6 pages).
             </p>
           </div>
 
@@ -492,23 +560,110 @@ export default function OrderCheck() {
             </label>
             <input
               className="input w-full"
-              placeholder="e.g. Metro Supermarket — Apr 20"
+              placeholder="e.g. Metro Supermarket — Apr 22"
               value={orderRef}
               onChange={e => setOrderRef(e.target.value)}
             />
           </div>
 
-          <PhotoCapture
-            label="Paper Order / Pick Slip"
-            hint="Take 1 photo per page — up to 6 pages. Lay flat, good lighting, all items visible."
-            photos={orderPhotos}
-            onAdd={(p) => setOrderPhotos(prev => [...prev, p])}
-            onRemove={(i) => setOrderPhotos(prev => prev.filter((_, j) => j !== i))}
-            maxPhotos={6}
+          {/* Hidden file input */}
+          <input
+            ref={orderInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            multiple
+            className="hidden"
+            onChange={handleOrderPhotoFiles}
           />
 
+          {/* Per-page photo + live scan results */}
+          <div className="space-y-3">
+            {orderPhotos.map((p, i) => {
+              const scan = orderScanResults[p.id] || { status: 'scanning', items: [], error: null }
+              return (
+                <div key={p.id} className="rounded-xl border border-gray-200 overflow-hidden bg-white shadow-sm">
+                  {/* Photo header */}
+                  <div className="flex items-center gap-3 p-3">
+                    <div className="relative flex-shrink-0 w-20 h-14 rounded-lg overflow-hidden border border-gray-200">
+                      <img src={p.preview} alt="" className="w-full h-full object-cover" />
+                      <button
+                        onClick={() => handleRemoveOrderPhoto(i)}
+                        className="absolute top-0.5 right-0.5 bg-red-500 text-white rounded-full p-0.5"
+                      >
+                        <Trash2 size={10} />
+                      </button>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-gray-800">Page {i + 1}</p>
+                      {scan.status === 'scanning' && (
+                        <p className="text-xs text-blue-500 flex items-center gap-1 mt-0.5">
+                          <Loader2 size={11} className="animate-spin" />
+                          Reading items from paper…
+                        </p>
+                      )}
+                      {scan.status === 'done' && (
+                        <p className="text-xs text-green-600 font-semibold mt-0.5">
+                          ✅ {scan.items.length} item{scan.items.length !== 1 ? 's' : ''} found
+                        </p>
+                      )}
+                      {scan.status === 'error' && (
+                        <p className="text-xs text-red-500 mt-0.5">
+                          ⚠️ {scan.error} — remove and re-take this page
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Extracted item list */}
+                  {scan.status === 'done' && scan.items.length > 0 && (
+                    <div className="border-t border-gray-100 bg-gray-50 divide-y divide-gray-100">
+                      {scan.items.map((item, j) => (
+                        <div key={j} className="flex items-center justify-between px-3 py-1.5">
+                          <span className="text-sm text-gray-800 font-medium truncate">{item.name}</span>
+                          <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+                            {item.code && (
+                              <span className="text-xs text-gray-400 font-mono">{item.code}</span>
+                            )}
+                            <span className="text-xs bg-gray-200 text-gray-700 rounded px-1.5 py-0.5 font-semibold">
+                              ×{item.qty || 1}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+
+            {/* Add page button */}
+            {orderPhotos.length < 6 && (
+              <button
+                onClick={() => orderInputRef.current?.click()}
+                className="w-full flex items-center justify-center gap-2 border-2 border-dashed border-gray-300 rounded-xl py-3 text-sm text-gray-500 hover:border-blue-400 hover:text-blue-600 transition-colors"
+              >
+                <Camera size={16} />
+                {orderPhotos.length === 0 ? 'Take Order Paper Photo' : `Add Page ${orderPhotos.length + 1}`}
+              </button>
+            )}
+          </div>
+
+          {/* Total summary — shown once all scans done */}
+          {allScansComplete && allOrderItems.length > 0 && (
+            <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3">
+              <p className="text-sm font-bold text-blue-800">
+                📋 {allOrderItems.length} items across {orderPhotos.length} page{orderPhotos.length !== 1 ? 's' : ''}
+              </p>
+              <p className="text-xs text-blue-600 mt-0.5">
+                Check the lists above — if any items are missing, remove that page and re-take it.
+                When correct, tap Next to photograph the boxes.
+              </p>
+            </div>
+          )}
+
           <button
-            disabled={orderPhotos.length === 0}
+            disabled={!allScansComplete}
             onClick={() => setStep(2)}
             className="btn-primary w-full flex items-center justify-center gap-2 disabled:opacity-40"
           >
