@@ -29,6 +29,64 @@ router = APIRouter(prefix="/order-check", tags=["Order Check"])
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 VISION_MODEL = "claude-3-5-haiku-20241022"
 
+# ── Shared prompt templates ───────────────────────────────────
+
+def _order_page_prompt(page_num: int) -> str:
+    return (
+        f"This is page {page_num} of a warehouse sales order / pick list.\n\n"
+        "Each line typically shows:  PRODUCT NAME   PACK SIZE   QUANTITY (boxes)\n"
+        "Common formats you will see:\n"
+        "  'Coriander Whole  20 x 400g   2'          → 2 cartons, pack 20x400g\n"
+        "  'Kohinoor Basmati 10x5kg — 3 box'         → 3 cartons, pack 10x5kg\n"
+        "  'Toor Dal 2LB  20x2LB  4'                 → 4 cartons, pack 20x2LB\n"
+        "  'GAZAB CHANA DAL 20x2LB  2 cs'            → 2 cartons, pack 20x2LB\n\n"
+        "Extract EVERY line item. Return ONLY valid JSON:\n"
+        '{"items": [{"name": "product name only", "code": "SKU/item code or empty string", '
+        '"pack": "pack config e.g. 20x400g", "qty": number_of_boxes}]}\n\n'
+        "Rules:\n"
+        "- name: product name ONLY — do NOT include the pack size in the name field\n"
+        "- pack: pack configuration like '20x400g', '10x5kg', '6x2LB', '24x500ml' "
+        "(use x, not ×; no spaces around x); empty string if not shown\n"
+        "- qty: the NUMBER OF BOXES/CARTONS ordered — the standalone number at the end "
+        "of the line, or after words like 'box', 'boxes', 'carton', 'cs', 'ctn'; use 1 if not shown\n"
+        "- code: item or SKU code if visible, else empty string\n"
+        "- Include highlighted, ticked, and un-ticked items — every line"
+    )
+
+def _box_photo_prompt() -> str:
+    return (
+        "These are product boxes/cartons on a warehouse floor.\n"
+        "Read ALL visible product names, brand names, item codes, and pack sizes from box labels.\n"
+        "Include every distinct product visible — even partially.\n\n"
+        "Return ONLY valid JSON:\n"
+        '{"items": [{"name": "product name as printed on box", "brand": "brand name", '
+        '"code": "item/SKU code or empty string", "pack": "pack config e.g. 20x400g or empty"}]}\n\n'
+        "- pack: extract pack configuration like '20x400g', '10x5kg', '24x500ml' from the box label\n"
+        "- If multiple identical boxes are visible, list the product once"
+    )
+
+def _match_prompt(order_items: list, floor_items: list) -> str:
+    return (
+        "You are verifying a warehouse dispatch order.\n\n"
+        f"ORDER (what SHOULD be on the floor):\n{json.dumps(order_items, indent=2)}\n\n"
+        f"FLOOR ITEMS (photographed boxes):\n{json.dumps(floor_items, indent=2)}\n\n"
+        "Matching rules:\n"
+        "- Match by PRODUCT NAME + PACK SIZE together.\n"
+        "  Example: order 'Coriander Whole' pack '20x400g' matches floor box "
+        "labeled 'CORIANDER WHOLE 20x400g' or 'Coriander Whole 20 x 400g'.\n"
+        "- Be flexible with spelling, capitalisation, spacing "
+        "('20 x 400g' = '20x400g', 'Kohinoor' = 'KOHINOOR').\n"
+        "- If pack sizes differ (e.g. order has 20x400g but floor has 10x400g), mark as EXTRA and MISSING.\n"
+        "- qty in matched = number of boxes/cartons ordered (from the order).\n"
+        "- matched: order item found on floor (correct pick)\n"
+        "- missing: in the order but NOT found on floor (possible short pick)\n"
+        "- extra:   on floor but NOT in the order (wrong item — should not be dispatched)\n\n"
+        "Return ONLY valid JSON:\n"
+        '{"matched": [{"order_name": "...", "pack": "...", "floor_name": "...", "qty": number}],\n'
+        ' "missing": [{"name": "...", "pack": "...", "code": "...", "qty": number, "note": "not found in photos"}],\n'
+        ' "extra":   [{"name": "...", "pack": "...", "brand": "...", "note": "NOT in order — possible wrong pick"}]}'
+    )
+
 
 def _get_async_client():
     if not ANTHROPIC_API_KEY:
@@ -110,7 +168,7 @@ async def scan_order_page(
     client = _get_async_client()
     resp = await client.messages.create(
         model=VISION_MODEL,
-        max_tokens=1024,
+        max_tokens=1500,
         messages=[{
             "role": "user",
             "content": [
@@ -118,17 +176,7 @@ async def scan_order_page(
                     "type": "image",
                     "source": {"type": "base64", "media_type": req.mime, "data": req.photo},
                 },
-                {
-                    "type": "text",
-                    "text": (
-                        f"This is page {req.page_num} of a warehouse sales order or pick list. "
-                        "Extract EVERY product listed — names, item codes/SKU codes, and quantities. "
-                        "Highlighted or ticked items are already picked — include them all. "
-                        "Return ONLY valid JSON, no explanation:\n"
-                        '{"items": [{"name": "product name", "code": "item or SKU code", "qty": number}]}\n'
-                        "Use empty string for code if not visible. Use 1 for qty if not shown."
-                    ),
-                },
+                {"type": "text", "text": _order_page_prompt(req.page_num)},
             ],
         }],
     )
@@ -157,7 +205,7 @@ async def analyze_order(
     async def read_order_page(photo: str, mime: str, page_idx: int) -> list:
         resp = await client.messages.create(
             model=VISION_MODEL,
-            max_tokens=1024,
+            max_tokens=1500,
             messages=[{
                 "role": "user",
                 "content": [
@@ -165,17 +213,7 @@ async def analyze_order(
                         "type": "image",
                         "source": {"type": "base64", "media_type": mime, "data": photo},
                     },
-                    {
-                        "type": "text",
-                        "text": (
-                            f"This is page {page_idx + 1} of a warehouse sales order or pick list. "
-                            "Extract EVERY product listed — names, item codes/SKU codes, and quantities. "
-                            "Highlighted or ticked items are already picked — include them all. "
-                            "Return ONLY valid JSON, no explanation:\n"
-                            '{"items": [{"name": "product name", "code": "item or SKU code", "qty": number}]}\n'
-                            "Use empty string for code if not visible. Use 1 for qty if not shown."
-                        ),
-                    },
+                    {"type": "text", "text": _order_page_prompt(page_idx + 1)},
                 ],
             }],
         )
@@ -184,7 +222,7 @@ async def analyze_order(
     async def read_box_photo(photo: str, mime: str) -> list:
         resp = await client.messages.create(
             model=VISION_MODEL,
-            max_tokens=1024,
+            max_tokens=1500,
             messages=[{
                 "role": "user",
                 "content": [
@@ -192,20 +230,7 @@ async def analyze_order(
                         "type": "image",
                         "source": {"type": "base64", "media_type": mime, "data": photo},
                     },
-                    {
-                        "type": "text",
-                        "text": (
-                            "These are product boxes/cartons on a warehouse floor. "
-                            "Read ALL visible product names, brand names, item codes, SKU codes, "
-                            "and pack sizes from box labels. "
-                            "Every distinct product visible — even partially — should be included. "
-                            "Return ONLY valid JSON:\n"
-                            '{"items": [{"name": "full product name as printed", '
-                            '"code": "item/SKU code if visible else empty", '
-                            '"brand": "brand name", "size": "pack size e.g. 20x2LB"}]}\n'
-                            "If multiple identical boxes are visible, list the product once."
-                        ),
-                    },
+                    {"type": "text", "text": _box_photo_prompt()},
                 ],
             }],
         )
@@ -251,11 +276,15 @@ async def analyze_order(
         page_results = all_results[:n_order]
         box_results  = all_results[n_order:]
 
-        # Flatten + deduplicate order items (merge qty for same name+code)
+        # Flatten + deduplicate order items (merge qty for same name+pack+code)
         raw_order_items = [item for page in page_results for item in page]
         merged: dict = {}
         for item in raw_order_items:
-            key = (item.get("name", "").lower().strip()[:40], item.get("code", "").lower().strip())
+            key = (
+                item.get("name", "").lower().strip()[:40],
+                item.get("pack", "").lower().replace(" ", ""),
+                item.get("code", "").lower().strip(),
+            )
             if key in merged:
                 merged[key]["qty"] = merged[key].get("qty", 1) + item.get("qty", 1)
             else:
@@ -278,27 +307,12 @@ async def analyze_order(
         max_tokens=2048,
         messages=[{
             "role": "user",
-            "content": (
-                "You are verifying a warehouse dispatch order.\n\n"
-                f"ORDER (what SHOULD be on the floor):\n{json.dumps(order_items, indent=2)}\n\n"
-                f"FLOOR ITEMS (what was PHOTOGRAPHED on the floor):\n{json.dumps(unique_floor, indent=2)}\n\n"
-                "Rules:\n"
-                "- Use SEMANTIC matching. 'Chana Dal 2LB' matches 'GAZAB CHANA DAL 20x2LB'. "
-                "'KBAS5' or 'Kohinoor Basmati 5KG' can match 'KOHINOOR BASMATI RICE 10x5KG'.\n"
-                "- Prefer matching over marking as missing/extra when there is any reasonable similarity.\n"
-                "- matched: items present in BOTH the order and floor photos\n"
-                "- missing: items in the ORDER but NOT found on floor (possible short pick)\n"
-                "- extra:   items on FLOOR but NOT in the order (WRONG item — should not be there)\n\n"
-                "Return ONLY valid JSON:\n"
-                '{"matched": [{"order_name": "...", "floor_name": "...", "qty": number}],\n'
-                ' "missing": [{"name": "...", "code": "...", "qty": number, "note": "not found in photos"}],\n'
-                ' "extra":   [{"name": "...", "brand": "...", "note": "NOT in order — possible wrong pick"}]}'
-            ),
+            "content": _match_prompt(order_items, unique_floor),
         }],
     )
     result = _parse_json(match_resp.content[0].text, {
         "matched": [],
-        "missing": [{"name": i.get("name"), "code": i.get("code"), "qty": i.get("qty", 1)} for i in order_items],
+        "missing": [{"name": i.get("name"), "pack": i.get("pack", ""), "code": i.get("code", ""), "qty": i.get("qty", 1)} for i in order_items],
         "extra":   [],
     })
 

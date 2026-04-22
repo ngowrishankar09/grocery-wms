@@ -224,10 +224,15 @@ function ResultsView({ matched, missing, extra, manualItems, setManualItems, not
         renderItem={(item) => (
           <div>
             <span className="font-medium">{item.order_name || item.name}</span>
+            {item.pack && <span className="text-xs text-gray-500 font-mono ml-1.5">{item.pack}</span>}
             {item.floor_name && item.floor_name !== item.order_name && (
               <span className="text-gray-400 text-xs ml-2">→ {item.floor_name}</span>
             )}
-            {item.qty && <span className="text-xs text-gray-500 ml-2">× {item.qty}</span>}
+            {item.qty && (
+              <span className="text-xs text-gray-500 ml-2">
+                × {item.qty} box{item.qty !== 1 ? 'es' : ''}
+              </span>
+            )}
           </div>
         )}
       />
@@ -242,8 +247,13 @@ function ResultsView({ matched, missing, extra, manualItems, setManualItems, not
         renderItem={(item) => (
           <div>
             <span className="font-medium text-red-700">{item.name || item.order_name}</span>
+            {item.pack && <span className="text-xs text-gray-500 font-mono ml-1.5">{item.pack}</span>}
             {item.code && <span className="text-xs text-gray-400 ml-2">({item.code})</span>}
-            {item.qty  && <span className="text-xs text-gray-500 ml-2">× {item.qty}</span>}
+            {item.qty  && (
+              <span className="text-xs text-gray-500 ml-2">
+                × {item.qty} box{item.qty !== 1 ? 'es' : ''}
+              </span>
+            )}
             <p className="text-xs text-red-400 mt-0.5">Short pick or not in photos</p>
           </div>
         )}
@@ -259,9 +269,10 @@ function ResultsView({ matched, missing, extra, manualItems, setManualItems, not
         renderItem={(item) => (
           <div>
             <span className="font-medium text-orange-800">{item.name || item.floor_name}</span>
+            {item.pack  && <span className="text-xs text-gray-500 font-mono ml-1.5">{item.pack}</span>}
             {item.brand && <span className="text-xs text-gray-400 ml-2">({item.brand})</span>}
             <p className="text-xs text-orange-500 font-medium mt-0.5">
-              This item is NOT on the order — wrong pick or wrong order mixed in
+              NOT on the order — wrong pick or wrong order mixed in
             </p>
           </div>
         )}
@@ -425,7 +436,11 @@ export default function OrderCheck() {
     const flat = orderPhotos.flatMap(p => orderScanResults[p.id]?.items || [])
     const merged = {}
     for (const item of flat) {
-      const key = `${(item.name || '').toLowerCase().trim().slice(0, 40)}|${(item.code || '').toLowerCase().trim()}`
+      const key = [
+        (item.name || '').toLowerCase().trim().slice(0, 40),
+        (item.pack || '').toLowerCase().replace(/\s/g, ''),
+        (item.code || '').toLowerCase().trim(),
+      ].join('|')
       if (merged[key]) merged[key] = { ...merged[key], qty: (merged[key].qty || 1) + (item.qty || 1) }
       else merged[key] = { ...item }
     }
@@ -619,16 +634,19 @@ export default function OrderCheck() {
                   {scan.status === 'done' && scan.items.length > 0 && (
                     <div className="border-t border-gray-100 bg-gray-50 divide-y divide-gray-100">
                       {scan.items.map((item, j) => (
-                        <div key={j} className="flex items-center justify-between px-3 py-1.5">
-                          <span className="text-sm text-gray-800 font-medium truncate">{item.name}</span>
-                          <div className="flex items-center gap-2 flex-shrink-0 ml-2">
-                            {item.code && (
-                              <span className="text-xs text-gray-400 font-mono">{item.code}</span>
+                        <div key={j} className="flex items-center justify-between px-3 py-1.5 gap-2">
+                          <div className="min-w-0">
+                            <span className="text-sm text-gray-800 font-medium">{item.name}</span>
+                            {item.pack && (
+                              <span className="text-xs text-gray-500 ml-1.5 font-mono">{item.pack}</span>
                             )}
-                            <span className="text-xs bg-gray-200 text-gray-700 rounded px-1.5 py-0.5 font-semibold">
-                              ×{item.qty || 1}
-                            </span>
+                            {item.code && (
+                              <span className="text-xs text-gray-400 ml-1.5">({item.code})</span>
+                            )}
                           </div>
+                          <span className="text-xs bg-blue-100 text-blue-800 rounded px-1.5 py-0.5 font-bold flex-shrink-0">
+                            {item.qty || 1} box{(item.qty || 1) !== 1 ? 'es' : ''}
+                          </span>
                         </div>
                       ))}
                     </div>
