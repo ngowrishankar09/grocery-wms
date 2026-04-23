@@ -477,6 +477,16 @@ export const repackingAPI = {
   removeOutput: (id, skuId) => api.delete(`/repacking/runs/${id}/output/${skuId}`),
   closeRun:   (id, data) => api.post(`/repacking/runs/${id}/close`, data),
   summary:    ()         => api.get('/repacking/summary'),
+  // Landed costs
+  listLandedCosts:  ()         => api.get('/repacking/landed-costs'),
+  createLandedCost: (data)     => api.post('/repacking/landed-costs', data),
+  updateLandedCost: (id, data) => api.put(`/repacking/landed-costs/${id}`, data),
+  deleteLandedCost: (id)       => api.delete(`/repacking/landed-costs/${id}`),
+  // Run costs
+  getRunCosts:      (runId)    => api.get(`/repacking/runs/${runId}/costs`),
+  saveRunCosts:     (runId, d) => api.post(`/repacking/runs/${runId}/costs`, d),
+  // Cost summary
+  costSummary:      (runId)    => api.get(`/repacking/runs/${runId}/cost-summary`),
 }
 
 export default api

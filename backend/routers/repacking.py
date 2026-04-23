@@ -16,7 +16,7 @@ from datetime import datetime
 import sys, os
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from database import get_db
-from models import BillOfMaterial, PackingRun, PackingRunOutput, PackingRunBulk, SKU
+from models import BillOfMaterial, PackingRun, PackingRunOutput, PackingRunBulk, SKU, LandedCost, PackingRunCost
 from security import get_current_user, get_company_id
 
 router = APIRouter(prefix="/repacking", tags=["Repacking"])
@@ -46,6 +46,28 @@ class OutputIn(BaseModel):
 class CloseIn(BaseModel):
     # List of {bulk_sku_id, qty_end} for each bulk entry in this run
     bulk_entries: List[dict]
+
+class LandedCostIn(BaseModel):
+    bulk_sku_id:       int
+    batch_ref:         Optional[str]   = None
+    qty_kg:            float
+    cost_material:     float           = 0.0
+    cost_freight:      float           = 0.0
+    cost_duty:         float           = 0.0
+    cost_packaging_mat: float          = 0.0
+    cost_labor:        float           = 0.0
+    cost_overhead:     float           = 0.0
+    cost_other:        float           = 0.0
+    currency:          str             = "USD"
+    notes:             Optional[str]   = None
+
+class PackingRunCostIn(BaseModel):
+    cost_packaging_mat: float          = 0.0
+    cost_labor:         float          = 0.0
+    cost_overhead:      float          = 0.0
+    cost_other:         float          = 0.0
+    labor_hours:        Optional[float] = None
+    notes:              Optional[str]  = None
 
 
 # ── Helpers ──────────────────────────────────────────────────────
@@ -519,4 +541,347 @@ def get_summary(
         "avg_variance_pct":  round(avg_variance_pct, 2),
         "sku_breakdown":     list(sku_breakdown.values()),
         "worst_runs":        worst_runs,
+    }
+
+
+# ── Landed Cost helpers ──────────────────────────────────────────
+
+def _compute_landed_totals(body_dict: dict) -> dict:
+    """Given the cost fields, compute total_cost and cost_per_kg."""
+    cost_fields = [
+        "cost_material", "cost_freight", "cost_duty",
+        "cost_packaging_mat", "cost_labor", "cost_overhead", "cost_other",
+    ]
+    total = sum(body_dict.get(f, 0.0) or 0.0 for f in cost_fields)
+    qty_kg = body_dict.get("qty_kg", 0.0) or 0.0
+    cpk = (total / qty_kg) if qty_kg > 0 else None
+    return {"total_cost": round(total, 4), "cost_per_kg": round(cpk, 6) if cpk is not None else None}
+
+def _fmt_landed(lc: LandedCost, db: Session) -> dict:
+    return {
+        "id":                lc.id,
+        "company_id":        lc.company_id,
+        "bulk_sku_id":       lc.bulk_sku_id,
+        "bulk_sku_name":     _sku_name(db, lc.bulk_sku_id),
+        "bulk_sku_code":     _sku_code(db, lc.bulk_sku_id),
+        "batch_ref":         lc.batch_ref,
+        "qty_kg":            lc.qty_kg,
+        "cost_material":     lc.cost_material,
+        "cost_freight":      lc.cost_freight,
+        "cost_duty":         lc.cost_duty,
+        "cost_packaging_mat": lc.cost_packaging_mat,
+        "cost_labor":        lc.cost_labor,
+        "cost_overhead":     lc.cost_overhead,
+        "cost_other":        lc.cost_other,
+        "total_cost":        lc.total_cost,
+        "cost_per_kg":       lc.cost_per_kg,
+        "currency":          lc.currency,
+        "notes":             lc.notes,
+        "created_at":        lc.created_at.isoformat() if lc.created_at else None,
+    }
+
+
+# ── Landed Cost endpoints ────────────────────────────────────────
+
+@router.get("/landed-costs")
+def list_landed_costs(
+    db:         Session = Depends(get_db),
+    company_id: int     = Depends(get_company_id),
+):
+    records = (
+        db.query(LandedCost)
+        .filter(LandedCost.company_id == company_id)
+        .order_by(LandedCost.created_at.desc())
+        .all()
+    )
+    return [_fmt_landed(lc, db) for lc in records]
+
+
+@router.post("/landed-costs", status_code=201)
+def create_landed_cost(
+    body:       LandedCostIn,
+    db:         Session = Depends(get_db),
+    company_id: int     = Depends(get_company_id),
+):
+    if not db.query(SKU).filter(SKU.id == body.bulk_sku_id).first():
+        raise HTTPException(status_code=404, detail="Bulk SKU not found")
+
+    totals = _compute_landed_totals(body.dict())
+    lc = LandedCost(
+        company_id        = company_id,
+        bulk_sku_id       = body.bulk_sku_id,
+        batch_ref         = body.batch_ref,
+        qty_kg            = body.qty_kg,
+        cost_material     = body.cost_material,
+        cost_freight      = body.cost_freight,
+        cost_duty         = body.cost_duty,
+        cost_packaging_mat = body.cost_packaging_mat,
+        cost_labor        = body.cost_labor,
+        cost_overhead     = body.cost_overhead,
+        cost_other        = body.cost_other,
+        total_cost        = totals["total_cost"],
+        cost_per_kg       = totals["cost_per_kg"],
+        currency          = body.currency,
+        notes             = body.notes,
+    )
+    db.add(lc)
+    db.commit()
+    db.refresh(lc)
+    return _fmt_landed(lc, db)
+
+
+@router.put("/landed-costs/{lc_id}")
+def update_landed_cost(
+    lc_id:      int,
+    body:       LandedCostIn,
+    db:         Session = Depends(get_db),
+    company_id: int     = Depends(get_company_id),
+):
+    lc = db.query(LandedCost).filter(
+        LandedCost.id == lc_id,
+        LandedCost.company_id == company_id,
+    ).first()
+    if not lc:
+        raise HTTPException(status_code=404, detail="Landed cost not found")
+
+    if not db.query(SKU).filter(SKU.id == body.bulk_sku_id).first():
+        raise HTTPException(status_code=404, detail="Bulk SKU not found")
+
+    totals = _compute_landed_totals(body.dict())
+    lc.bulk_sku_id        = body.bulk_sku_id
+    lc.batch_ref          = body.batch_ref
+    lc.qty_kg             = body.qty_kg
+    lc.cost_material      = body.cost_material
+    lc.cost_freight       = body.cost_freight
+    lc.cost_duty          = body.cost_duty
+    lc.cost_packaging_mat = body.cost_packaging_mat
+    lc.cost_labor         = body.cost_labor
+    lc.cost_overhead      = body.cost_overhead
+    lc.cost_other         = body.cost_other
+    lc.total_cost         = totals["total_cost"]
+    lc.cost_per_kg        = totals["cost_per_kg"]
+    lc.currency           = body.currency
+    lc.notes              = body.notes
+    db.commit()
+    db.refresh(lc)
+    return _fmt_landed(lc, db)
+
+
+@router.delete("/landed-costs/{lc_id}", status_code=204)
+def delete_landed_cost(
+    lc_id:      int,
+    db:         Session = Depends(get_db),
+    company_id: int     = Depends(get_company_id),
+):
+    lc = db.query(LandedCost).filter(
+        LandedCost.id == lc_id,
+        LandedCost.company_id == company_id,
+    ).first()
+    if not lc:
+        raise HTTPException(status_code=404, detail="Landed cost not found")
+    db.delete(lc)
+    db.commit()
+    return None
+
+
+# ── Packing Run Cost endpoints ───────────────────────────────────
+
+def _fmt_run_cost(rc: PackingRunCost) -> dict:
+    return {
+        "id":                rc.id,
+        "run_id":            rc.run_id,
+        "cost_packaging_mat": rc.cost_packaging_mat,
+        "cost_labor":        rc.cost_labor,
+        "cost_overhead":     rc.cost_overhead,
+        "cost_other":        rc.cost_other,
+        "labor_hours":       rc.labor_hours,
+        "notes":             rc.notes,
+        "created_at":        rc.created_at.isoformat() if rc.created_at else None,
+        "updated_at":        rc.updated_at.isoformat() if rc.updated_at else None,
+    }
+
+def _empty_run_cost(run_id: int) -> dict:
+    return {
+        "id": None,
+        "run_id": run_id,
+        "cost_packaging_mat": 0.0,
+        "cost_labor": 0.0,
+        "cost_overhead": 0.0,
+        "cost_other": 0.0,
+        "labor_hours": None,
+        "notes": None,
+        "created_at": None,
+        "updated_at": None,
+    }
+
+
+@router.get("/runs/{run_id}/costs")
+def get_run_costs(
+    run_id:     int,
+    db:         Session = Depends(get_db),
+    company_id: int     = Depends(get_company_id),
+):
+    run = db.query(PackingRun).filter(
+        PackingRun.id == run_id,
+        PackingRun.company_id == company_id,
+    ).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    rc = db.query(PackingRunCost).filter(PackingRunCost.run_id == run_id).first()
+    if not rc:
+        return _empty_run_cost(run_id)
+    return _fmt_run_cost(rc)
+
+
+@router.post("/runs/{run_id}/costs")
+def save_run_costs(
+    run_id:     int,
+    body:       PackingRunCostIn,
+    db:         Session = Depends(get_db),
+    company_id: int     = Depends(get_company_id),
+):
+    run = db.query(PackingRun).filter(
+        PackingRun.id == run_id,
+        PackingRun.company_id == company_id,
+    ).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    rc = db.query(PackingRunCost).filter(PackingRunCost.run_id == run_id).first()
+    if rc:
+        rc.cost_packaging_mat = body.cost_packaging_mat
+        rc.cost_labor         = body.cost_labor
+        rc.cost_overhead      = body.cost_overhead
+        rc.cost_other         = body.cost_other
+        rc.labor_hours        = body.labor_hours
+        rc.notes              = body.notes
+        rc.updated_at         = datetime.utcnow()
+    else:
+        rc = PackingRunCost(
+            run_id            = run_id,
+            cost_packaging_mat = body.cost_packaging_mat,
+            cost_labor        = body.cost_labor,
+            cost_overhead     = body.cost_overhead,
+            cost_other        = body.cost_other,
+            labor_hours       = body.labor_hours,
+            notes             = body.notes,
+        )
+        db.add(rc)
+    db.commit()
+    db.refresh(rc)
+    return _fmt_run_cost(rc)
+
+
+# ── Cost Summary endpoint ────────────────────────────────────────
+
+@router.get("/runs/{run_id}/cost-summary")
+def get_cost_summary(
+    run_id:     int,
+    db:         Session = Depends(get_db),
+    company_id: int     = Depends(get_company_id),
+):
+    run = db.query(PackingRun).filter(
+        PackingRun.id == run_id,
+        PackingRun.company_id == company_id,
+    ).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    outputs = db.query(PackingRunOutput).filter(PackingRunOutput.run_id == run_id).all()
+    bulk_entries = db.query(PackingRunBulk).filter(PackingRunBulk.run_id == run_id).all()
+
+    # Determine the bulk SKU used in this run (first bulk entry)
+    bulk_sku_id = bulk_entries[0].bulk_sku_id if bulk_entries else None
+
+    # Find most recent LandedCost for this bulk SKU
+    landed_cost = None
+    if bulk_sku_id is not None:
+        landed_cost = (
+            db.query(LandedCost)
+            .filter(
+                LandedCost.company_id == company_id,
+                LandedCost.bulk_sku_id == bulk_sku_id,
+            )
+            .order_by(LandedCost.created_at.desc())
+            .first()
+        )
+
+    # Get PackingRunCost for this run
+    run_cost = db.query(PackingRunCost).filter(PackingRunCost.run_id == run_id).first()
+
+    # Compute total cases and per-output data
+    total_cases = sum(o.qty_packed for o in outputs)
+    total_theoretical_kg = 0.0
+    per_output = []
+
+    cost_per_kg = landed_cost.cost_per_kg if (landed_cost and landed_cost.cost_per_kg) else 0.0
+
+    # Packing run costs
+    packing_pkg   = run_cost.cost_packaging_mat if run_cost else 0.0
+    packing_labor = run_cost.cost_labor         if run_cost else 0.0
+    packing_oh    = run_cost.cost_overhead      if run_cost else 0.0
+    packing_other = run_cost.cost_other         if run_cost else 0.0
+    labor_hours   = run_cost.labor_hours        if run_cost else None
+    packing_total = packing_pkg + packing_labor + packing_oh + packing_other
+
+    packing_cost_per_case = (packing_total / total_cases) if total_cases > 0 else 0.0
+
+    for out in outputs:
+        bom = db.query(BillOfMaterial).filter(
+            BillOfMaterial.company_id == company_id,
+            BillOfMaterial.output_sku_id == out.sku_id,
+        ).first()
+        bom_qty = bom.qty_per_unit if bom else None
+        kg_used = (out.qty_packed * bom_qty) if bom_qty is not None else None
+        if kg_used is not None:
+            total_theoretical_kg += kg_used
+
+        material_per_case = (bom_qty * cost_per_kg) if (bom_qty is not None and cost_per_kg) else 0.0
+        total_per_case    = material_per_case + packing_cost_per_case
+
+        per_output.append({
+            "sku_id":           out.sku_id,
+            "product_name":     _sku_name(db, out.sku_id),
+            "sku_code":         _sku_code(db, out.sku_id),
+            "qty_packed":       out.qty_packed,
+            "bom_qty_per_unit": bom_qty,
+            "kg_used":          round(kg_used, 4) if kg_used is not None else None,
+            "material_per_case": round(material_per_case, 4),
+            "packing_per_case":  round(packing_cost_per_case, 4),
+            "total_per_case":    round(total_per_case, 4),
+            "subtotal_material": round(out.qty_packed * material_per_case, 4),
+            "subtotal_total":    round(out.qty_packed * total_per_case, 4),
+        })
+
+    bulk_material_cost = total_theoretical_kg * cost_per_kg
+    grand_total_cost   = bulk_material_cost + packing_total
+    grand_total_per_case_avg = (grand_total_cost / total_cases) if total_cases > 0 else 0.0
+
+    return {
+        "run_id":               run_id,
+        "run_ref":              run.run_ref,
+        "status":               run.status,
+        "bulk_sku_id":          bulk_sku_id,
+        "bulk_sku_name":        _sku_name(db, bulk_sku_id) if bulk_sku_id else None,
+        # Landed cost info
+        "landed_cost_id":       landed_cost.id if landed_cost else None,
+        "landed_cost_ref":      landed_cost.batch_ref if landed_cost else None,
+        "cost_per_kg":          cost_per_kg,
+        "total_theoretical_kg": round(total_theoretical_kg, 4),
+        "bulk_material_cost":   round(bulk_material_cost, 4),
+        # Packing costs
+        "packing_costs": {
+            "cost_packaging_mat": packing_pkg,
+            "cost_labor":         packing_labor,
+            "cost_overhead":      packing_oh,
+            "cost_other":         packing_other,
+            "labor_hours":        labor_hours,
+            "total":              round(packing_total, 4),
+        },
+        "packing_cost_per_case":      round(packing_cost_per_case, 4),
+        "total_cases":                total_cases,
+        "per_output":                 per_output,
+        "grand_total_cost":           round(grand_total_cost, 4),
+        "grand_total_per_case_avg":   round(grand_total_per_case_avg, 4),
     }

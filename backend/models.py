@@ -1081,6 +1081,42 @@ class PackingRunBulk(Base):
     variance_pct   = Column(Float, nullable=True)
 
 
+# ─── Landed Cost (bulk sourcing + import costs) ───────────────
+class LandedCost(Base):
+    __tablename__ = "landed_costs"
+    id                    = Column(Integer, primary_key=True, index=True)
+    company_id            = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
+    bulk_sku_id           = Column(Integer, ForeignKey("skus.id"), nullable=False)
+    batch_ref             = Column(String, nullable=True)   # e.g. "India Apr 2026"
+    qty_kg                = Column(Float, nullable=False)   # total kg in this batch
+    cost_material         = Column(Float, default=0.0)      # purchase/FOB price
+    cost_freight          = Column(Float, default=0.0)      # shipping/sea freight
+    cost_duty             = Column(Float, default=0.0)      # import duty/customs
+    cost_packaging_mat    = Column(Float, default=0.0)      # boxes, bags, labels
+    cost_labor            = Column(Float, default=0.0)      # packing labor
+    cost_overhead         = Column(Float, default=0.0)      # electricity, rent share
+    cost_other            = Column(Float, default=0.0)      # misc
+    total_cost            = Column(Float, nullable=True)    # auto-sum of all costs
+    cost_per_kg           = Column(Float, nullable=True)    # total_cost / qty_kg
+    currency              = Column(String(10), default="USD")
+    notes                 = Column(String, nullable=True)
+    created_at            = Column(DateTime, default=datetime.utcnow)
+
+# ─── Packing Run Costs (production operational costs) ─────────
+class PackingRunCost(Base):
+    __tablename__ = "packing_run_costs"
+    id                    = Column(Integer, primary_key=True, index=True)
+    run_id                = Column(Integer, ForeignKey("packing_runs.id"), nullable=False, unique=True)
+    cost_packaging_mat    = Column(Float, default=0.0)   # boxes/bags/labels bought for this run
+    cost_labor            = Column(Float, default=0.0)   # wages for this run
+    cost_overhead         = Column(Float, default=0.0)   # electricity, rent allocation
+    cost_other            = Column(Float, default=0.0)   # misc
+    labor_hours           = Column(Float, nullable=True) # optional: hours worked
+    notes                 = Column(String, nullable=True)
+    created_at            = Column(DateTime, default=datetime.utcnow)
+    updated_at            = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 def get_engine(db_path="./wms.db"):
     import os
     db_url = os.environ.get("DATABASE_URL", "")
