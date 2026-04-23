@@ -1,9 +1,21 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { repackingAPI, skuAPI } from '../api/client'
 import {
   Loader2, Plus, Trash2, Package, ChevronLeft, AlertTriangle,
-  CheckCircle2, X, Factory,
+  CheckCircle2, X, Factory, Scale,
 } from 'lucide-react'
+
+// ── Live packing summary helpers ─────────────────────────────
+/** From an open run's outputs (with bom_live_kg), compute total theoretical kg */
+function calcTheoreticalKg(outputs) {
+  return outputs.reduce((sum, o) => sum + (o.bom_live_kg ?? 0), 0)
+}
+
+/** Expected remaining on scale = qty_start - theoretical */
+function calcExpectedRemaining(qtyStart, theoreticalKg) {
+  if (qtyStart == null) return null
+  return Math.max(0, qtyStart - theoreticalKg)
+}
 
 // ── Variance colour helper ────────────────────────────────────
 function varianceColor(pct) {
@@ -166,7 +178,7 @@ function BOMTab({ skus }) {
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">
-                  Qty per unit (bulk consumed per 1 retail box) <span className="text-red-500">*</span>
+                  Bulk kg per case <span className="text-red-500">*</span>
                 </label>
                 <div className="flex gap-2">
                   <input
@@ -174,7 +186,7 @@ function BOMTab({ skus }) {
                     step="0.001"
                     min="0.001"
                     className="input flex-1"
-                    placeholder="e.g. 0.4"
+                    placeholder="e.g. 4.0"
                     value={form.qty_per_unit}
                     onChange={e => setForm(f => ({ ...f, qty_per_unit: e.target.value }))}
                     required
@@ -187,6 +199,10 @@ function BOMTab({ skus }) {
                     onChange={e => setForm(f => ({ ...f, unit: e.target.value }))}
                   />
                 </div>
+                <p className="text-xs text-gray-400 mt-1">
+                  How much bulk is consumed per 1 case. Example: a case of 20 × 200g packs uses 20 × 0.200 = <strong>4.0 kg</strong> of bulk.
+                  For 50 × 400g packs per case: 50 × 0.400 = <strong>20.0 kg</strong>.
+                </p>
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">
@@ -253,7 +269,7 @@ function BOMTab({ skus }) {
               <tr>
                 <th className="px-4 py-3 text-left">Output SKU (retail)</th>
                 <th className="px-4 py-3 text-left">Input SKU (bulk)</th>
-                <th className="px-4 py-3 text-right">Qty / unit</th>
+                <th className="px-4 py-3 text-right">Bulk kg / case</th>
                 <th className="px-4 py-3 text-right">Waste allowed</th>
                 <th className="px-4 py-3 text-left">Notes</th>
                 <th className="px-4 py-3" />
@@ -535,13 +551,13 @@ function RunsTab({ skus }) {
             {/* Outputs section */}
             <div className="card">
               <div className="flex items-center justify-between mb-3">
-                <h3 className="font-semibold text-gray-800">Retail Outputs Packed</h3>
+                <h3 className="font-semibold text-gray-800">Cases Packed</h3>
                 {runDetail.status === 'open' && (
                   <button
                     onClick={() => { setShowAddOutput(s => !s); setOutputFormError(null) }}
                     className="btn-secondary flex items-center gap-1.5 text-sm"
                   >
-                    <Plus size={14} /> Add Output
+                    <Plus size={14} /> Add Cases
                   </button>
                 )}
               </div>
@@ -550,7 +566,7 @@ function RunsTab({ skus }) {
                 <form onSubmit={handleAddOutput} className="mb-4 p-3 bg-gray-50 rounded-lg space-y-2">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                     <div>
-                      <label className="block text-xs font-medium text-gray-700 mb-1">Retail SKU</label>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">Retail SKU (what was packed)</label>
                       <select
                         className="input w-full"
                         value={outputForm.sku_id}
@@ -564,13 +580,13 @@ function RunsTab({ skus }) {
                       </select>
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-gray-700 mb-1">Qty Packed (boxes)</label>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">Cases packed</label>
                       <input
                         type="number"
-                        step="0.01"
-                        min="0.01"
+                        step="1"
+                        min="1"
                         className="input w-full"
-                        placeholder="e.g. 200"
+                        placeholder="e.g. 50 cases"
                         value={outputForm.qty_packed}
                         onChange={e => setOutputForm(f => ({ ...f, qty_packed: e.target.value }))}
                         required
@@ -593,45 +609,113 @@ function RunsTab({ skus }) {
               )}
 
               {runDetail.outputs.length === 0 ? (
-                <p className="text-sm text-gray-400 py-4 text-center">No outputs added yet.</p>
+                <p className="text-sm text-gray-400 py-4 text-center">No outputs added yet. Add each product type you packed.</p>
               ) : (
                 <table className="w-full text-sm">
                   <thead className="text-xs text-gray-500 uppercase tracking-wide">
                     <tr>
                       <th className="pb-2 text-left">SKU</th>
-                      <th className="pb-2 text-right">Qty Packed</th>
-                      <th className="pb-2 text-right">Theoretical kg</th>
+                      <th className="pb-2 text-right">Cases</th>
+                      <th className="pb-2 text-right">BOM rate</th>
+                      <th className="pb-2 text-right">Bulk used</th>
                       {runDetail.status === 'open' && <th className="pb-2" />}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {runDetail.outputs.map(o => (
-                      <tr key={o.id}>
-                        <td className="py-2">
-                          <div className="font-medium text-gray-800">{o.product_name}</div>
-                          <div className="text-xs text-gray-400">{o.sku_code}</div>
-                        </td>
-                        <td className="py-2 text-right font-mono">{o.qty_packed}</td>
-                        <td className="py-2 text-right font-mono">
-                          {o.theoretical_kg != null ? `${o.theoretical_kg.toFixed(3)} kg` : '—'}
-                        </td>
-                        {runDetail.status === 'open' && (
-                          <td className="py-2 text-right">
-                            <button
-                              onClick={() => handleRemoveOutput(o.sku_id)}
-                              className="p-1 text-gray-400 hover:text-red-500 rounded"
-                              title="Remove"
-                            >
-                              <X size={13} />
-                            </button>
+                    {runDetail.outputs.map(o => {
+                      const liveKg = o.bom_live_kg ?? o.theoretical_kg
+                      return (
+                        <tr key={o.id}>
+                          <td className="py-2">
+                            <div className="font-medium text-gray-800">{o.product_name}</div>
+                            <div className="text-xs text-gray-400">{o.sku_code}</div>
                           </td>
-                        )}
+                          <td className="py-2 text-right font-mono font-semibold">{o.qty_packed}</td>
+                          <td className="py-2 text-right text-xs text-gray-500">
+                            {o.bom_qty_per_unit != null
+                              ? `${o.bom_qty_per_unit} ${o.bom_unit ?? 'kg'}/case`
+                              : <span className="text-orange-500">No BOM</span>}
+                          </td>
+                          <td className="py-2 text-right font-mono">
+                            {liveKg != null
+                              ? <span className="font-semibold text-blue-700">{liveKg.toFixed(3)} kg</span>
+                              : '—'}
+                          </td>
+                          {runDetail.status === 'open' && (
+                            <td className="py-2 text-right">
+                              <button
+                                onClick={() => handleRemoveOutput(o.sku_id)}
+                                className="p-1 text-gray-400 hover:text-red-500 rounded"
+                                title="Remove"
+                              ><X size={13} /></button>
+                            </td>
+                          )}
+                        </tr>
+                      )
+                    })}
+                    {/* Totals row */}
+                    {runDetail.outputs.length > 1 && (
+                      <tr className="border-t-2 border-gray-300 bg-gray-50">
+                        <td className="py-2 font-semibold text-gray-700" colSpan={2}>Total bulk consumed</td>
+                        <td />
+                        <td className="py-2 text-right font-bold text-blue-700">
+                          {calcTheoreticalKg(runDetail.outputs).toFixed(3)} kg
+                        </td>
+                        {runDetail.status === 'open' && <td />}
                       </tr>
-                    ))}
+                    )}
                   </tbody>
                 </table>
               )}
             </div>
+
+            {/* ── Expected Remaining on Scale ── */}
+            {runDetail.status === 'open' && runDetail.outputs.length > 0 && runDetail.bulk_entries.length > 0 && (() => {
+              const theoretical = calcTheoreticalKg(runDetail.outputs)
+              const qtyStart    = runDetail.bulk_entries[0]?.qty_start
+              const expected    = calcExpectedRemaining(qtyStart, theoretical)
+              const hasBom      = runDetail.outputs.some(o => o.bom_qty_per_unit != null)
+              if (!hasBom) return null
+              return (
+                <div className="rounded-xl border-2 border-blue-400 bg-blue-50 p-4 space-y-3">
+                  <div className="flex items-center gap-2 text-blue-800 font-bold text-base">
+                    <Scale size={18} /> Packing Summary
+                  </div>
+                  {/* Per-line breakdown */}
+                  <div className="space-y-1 text-sm">
+                    {runDetail.outputs.filter(o => o.bom_live_kg != null).map(o => (
+                      <div key={o.id} className="flex justify-between text-gray-700">
+                        <span>{o.product_name} × {o.qty_packed} cases</span>
+                        <span className="font-mono font-semibold">{o.bom_live_kg.toFixed(3)} kg</span>
+                      </div>
+                    ))}
+                    <div className="border-t border-blue-200 mt-1 pt-1 flex justify-between font-semibold text-gray-800">
+                      <span>Total bulk consumed (theoretical)</span>
+                      <span className="font-mono">{theoretical.toFixed(3)} kg</span>
+                    </div>
+                    <div className="flex justify-between text-gray-600">
+                      <span>Bulk starting weight</span>
+                      <span className="font-mono">{qtyStart?.toFixed(3)} kg</span>
+                    </div>
+                  </div>
+                  {/* Big expected remaining */}
+                  <div className="bg-white border-2 border-blue-500 rounded-lg px-4 py-3 flex items-center justify-between">
+                    <div>
+                      <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">⚖️ Expected remaining on scale</p>
+                      <p className="text-3xl font-black text-blue-700 mt-0.5">{expected?.toFixed(3)} kg</p>
+                    </div>
+                    <div className="text-right text-xs text-gray-400">
+                      <p>{qtyStart?.toFixed(3)} kg start</p>
+                      <p>− {theoretical.toFixed(3)} kg used</p>
+                    </div>
+                  </div>
+                  <p className="text-xs text-blue-600">
+                    Weigh what's left on the scale. If it matches the expected weight above, all bulk is accounted for.
+                    Any difference will be flagged as waste or potential theft when you close this run.
+                  </p>
+                </div>
+              )
+            })()}
 
             {/* Bulk usage section */}
             <div className="card">
@@ -673,50 +757,116 @@ function RunsTab({ skus }) {
             {/* Close run section */}
             {runDetail.status === 'open' && (
               <div className="card border border-orange-200 bg-orange-50">
-                <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center justify-between mb-2">
                   <h3 className="font-semibold text-gray-800">Close Packing Run</h3>
                   <button
                     onClick={() => {
                       setShowClose(s => !s)
                       setCloseError(null)
-                      // Init qty_end state
                       const init = {}
                       runDetail.bulk_entries.forEach(b => { init[b.bulk_sku_id] = '' })
                       setCloseQtyEnd(init)
                     }}
                     className="btn-primary flex items-center gap-1.5 text-sm"
                   >
-                    <Factory size={14} /> Close Run
+                    <Scale size={14} /> Weigh & Close
                   </button>
                 </div>
-                <p className="text-sm text-gray-600 mb-3">
-                  Weigh the remaining bulk material and enter the ending weight to calculate actual usage and variance.
-                </p>
+
                 {showClose && (
-                  <form onSubmit={handleCloseRun} className="space-y-3">
-                    {runDetail.bulk_entries.map(b => (
-                      <div key={b.id} className="flex items-center gap-3">
-                        <div className="flex-1">
-                          <label className="block text-xs font-medium text-gray-700 mb-1">
-                            Ending weight for: {b.product_name}
-                          </label>
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm text-gray-500">Started: {b.qty_start} kg →</span>
-                            <input
-                              type="number"
-                              step="0.001"
-                              min="0"
-                              className="input w-36"
-                              placeholder="Ending kg"
-                              value={closeQtyEnd[b.bulk_sku_id] ?? ''}
-                              onChange={e => setCloseQtyEnd(prev => ({ ...prev, [b.bulk_sku_id]: e.target.value }))}
-                              required
-                            />
-                            <span className="text-sm text-gray-500">kg remaining</span>
+                  <form onSubmit={handleCloseRun} className="space-y-4 mt-3">
+                    {runDetail.bulk_entries.map(b => {
+                      const theoretical = calcTheoreticalKg(runDetail.outputs)
+                      const expected    = calcExpectedRemaining(b.qty_start, theoretical)
+                      const actualInput = parseFloat(closeQtyEnd[b.bulk_sku_id])
+                      const actualUsed  = !isNaN(actualInput) ? b.qty_start - actualInput : null
+                      const liveVariance = actualUsed != null ? actualUsed - theoretical : null
+                      const liveVariancePct = theoretical > 0 && liveVariance != null
+                        ? (liveVariance / theoretical * 100) : null
+
+                      return (
+                        <div key={b.id} className="space-y-3">
+                          {/* Step 1: show expected */}
+                          <div className="bg-white border border-blue-300 rounded-xl p-3">
+                            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                              {b.product_name} — {b.qty_start} kg started
+                            </p>
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <p className="text-xs text-gray-500">⚖️ Expected remaining on scale</p>
+                                <p className="text-2xl font-black text-blue-700">
+                                  {expected != null ? `${expected.toFixed(3)} kg` : '—'}
+                                </p>
+                                <p className="text-xs text-gray-400 mt-0.5">
+                                  ({b.qty_start} kg start − {theoretical.toFixed(3)} kg theoretical use)
+                                </p>
+                              </div>
+                            </div>
                           </div>
+
+                          {/* Step 2: enter actual */}
+                          <div>
+                            <label className="block text-sm font-semibold text-gray-700 mb-1">
+                              Weigh the remaining bulk → enter actual weight on scale (kg)
+                            </label>
+                            <div className="flex items-center gap-3">
+                              <input
+                                type="number"
+                                step="0.001"
+                                min="0"
+                                className="input w-40 text-lg font-bold"
+                                placeholder={expected != null ? `Should be ~${expected.toFixed(1)}` : 'kg'}
+                                value={closeQtyEnd[b.bulk_sku_id] ?? ''}
+                                onChange={e => setCloseQtyEnd(prev => ({ ...prev, [b.bulk_sku_id]: e.target.value }))}
+                                required
+                              />
+                              <span className="text-sm text-gray-500 font-medium">kg remaining on scale</span>
+                            </div>
+                          </div>
+
+                          {/* Live variance preview as user types */}
+                          {liveVariance != null && (
+                            <div className={`rounded-lg px-4 py-3 ${Math.abs(liveVariancePct ?? 0) <= 2 ? 'bg-green-50 border border-green-200' : Math.abs(liveVariancePct ?? 0) <= 5 ? 'bg-amber-50 border border-amber-200' : 'bg-red-50 border border-red-200'}`}>
+                              <div className="grid grid-cols-3 gap-3 text-sm">
+                                <div>
+                                  <p className="text-xs text-gray-500">Theoretical used</p>
+                                  <p className="font-bold">{theoretical.toFixed(3)} kg</p>
+                                </div>
+                                <div>
+                                  <p className="text-xs text-gray-500">Actual used</p>
+                                  <p className="font-bold">{actualUsed?.toFixed(3)} kg</p>
+                                </div>
+                                <div>
+                                  <p className="text-xs text-gray-500">Variance</p>
+                                  <p className={`font-bold ${varianceColor(liveVariancePct)}`}>
+                                    {liveVariance >= 0 ? '+' : ''}{liveVariance.toFixed(3)} kg
+                                    {liveVariancePct != null && (
+                                      <span className="ml-1 text-xs">({liveVariancePct >= 0 ? '+' : ''}{liveVariancePct.toFixed(1)}%)</span>
+                                    )}
+                                  </p>
+                                </div>
+                              </div>
+                              {liveVariancePct != null && Math.abs(liveVariancePct) > 5 && (
+                                <p className="mt-2 text-sm font-bold text-red-700 flex items-center gap-1">
+                                  <AlertTriangle size={14} /> HIGH VARIANCE — {Math.abs(liveVariance).toFixed(3)} kg unaccounted for. Possible theft or significant spillage.
+                                </p>
+                              )}
+                              {liveVariancePct != null && Math.abs(liveVariancePct) > 2 && Math.abs(liveVariancePct) <= 5 && (
+                                <p className="mt-2 text-sm font-semibold text-amber-700 flex items-center gap-1">
+                                  <AlertTriangle size={14} /> Above normal waste tolerance — review before closing.
+                                </p>
+                              )}
+                              {liveVariancePct != null && Math.abs(liveVariancePct) <= 2 && (
+                                <p className="mt-2 text-sm font-semibold text-green-700 flex items-center gap-1">
+                                  <CheckCircle2 size={14} /> All bulk accounted for — within acceptable range.
+                                </p>
+                              )}
+                            </div>
+                          )}
                         </div>
-                      </div>
-                    ))}
+                      )
+                    })}
+
                     {closeError && (
                       <p className="text-sm text-red-600 flex items-center gap-1">
                         <AlertTriangle size={14} /> {closeError}
@@ -725,7 +875,7 @@ function RunsTab({ skus }) {
                     <div className="flex gap-2">
                       <button type="submit" className="btn-primary flex items-center gap-1.5" disabled={closing}>
                         {closing && <Loader2 size={14} className="animate-spin" />}
-                        Confirm Close
+                        Confirm & Close Run
                       </button>
                       <button type="button" className="btn-secondary" onClick={() => setShowClose(false)}>Cancel</button>
                     </div>

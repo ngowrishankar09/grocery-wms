@@ -84,6 +84,20 @@ def _fmt_run(run: PackingRun, db: Session) -> dict:
                 "product_name":  _sku_name(db, o.sku_id),
                 "qty_packed":    o.qty_packed,
                 "theoretical_kg": o.theoretical_kg,
+                # Include BOM rate so frontend can show live expected-remaining
+                # before the run is closed (theoretical_kg is only set at close time)
+                **({
+                    "bom_qty_per_unit": bom.qty_per_unit,
+                    "bom_unit":         bom.unit,
+                    "bom_live_kg":      round(o.qty_packed * bom.qty_per_unit, 4),
+                } if (bom := db.query(BillOfMaterial).filter(
+                    BillOfMaterial.company_id == run.company_id,
+                    BillOfMaterial.output_sku_id == o.sku_id,
+                ).first()) else {
+                    "bom_qty_per_unit": None,
+                    "bom_unit":         None,
+                    "bom_live_kg":      None,
+                }),
             }
             for o in outputs
         ],
