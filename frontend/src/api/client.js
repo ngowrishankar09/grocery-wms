@@ -464,4 +464,19 @@ export const orderCheckAPI = {
   get:      (id)     => api.get(`/order-check/history/${id}`),
 }
 
+export const repackingAPI = {
+  // BOM
+  listBOM:    ()         => api.get('/repacking/bom'),
+  createBOM:  (data)     => api.post('/repacking/bom', data),
+  deleteBOM:  (id)       => api.delete(`/repacking/bom/${id}`),
+  // Runs
+  listRuns:   ()         => api.get('/repacking/runs'),
+  createRun:  (data)     => api.post('/repacking/runs', data),
+  getRun:     (id)       => api.get(`/repacking/runs/${id}`),
+  addOutput:  (id, data) => api.post(`/repacking/runs/${id}/output`, data),
+  removeOutput: (id, skuId) => api.delete(`/repacking/runs/${id}/output/${skuId}`),
+  closeRun:   (id, data) => api.post(`/repacking/runs/${id}/close`, data),
+  summary:    ()         => api.get('/repacking/summary'),
+}
+
 export default api

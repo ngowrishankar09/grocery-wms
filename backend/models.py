@@ -1030,6 +1030,57 @@ class OrderCheckRecord(Base):
     created_at      = Column(DateTime, default=datetime.utcnow, index=True)
 
 
+# ─── Repacking / Production ───────────────────────────────────
+class BillOfMaterial(Base):
+    __tablename__ = "bill_of_materials"
+    id                 = Column(Integer, primary_key=True, index=True)
+    company_id         = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
+    output_sku_id      = Column(Integer, ForeignKey("skus.id"), nullable=False)   # retail/finished
+    input_sku_id       = Column(Integer, ForeignKey("skus.id"), nullable=False)   # bulk raw material
+    qty_per_unit       = Column(Float,   nullable=False)   # kg of bulk per 1 retail box
+    unit               = Column(String(20), default="kg")
+    waste_pct_allowed  = Column(Float, default=2.0)        # acceptable waste % threshold
+    notes              = Column(String, nullable=True)
+    created_at         = Column(DateTime, default=datetime.utcnow)
+
+class PackingRun(Base):
+    __tablename__ = "packing_runs"
+    id             = Column(Integer, primary_key=True, index=True)
+    company_id     = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
+    run_ref        = Column(String, nullable=True)          # order ref or batch label
+    status         = Column(String(20), default="open")     # open | closed
+    started_by     = Column(String, nullable=True)
+    notes          = Column(String, nullable=True)
+    created_at     = Column(DateTime, default=datetime.utcnow)
+    closed_at      = Column(DateTime, nullable=True)
+    # Filled at close time
+    theoretical_kg = Column(Float, nullable=True)
+    actual_kg      = Column(Float, nullable=True)
+    variance_kg    = Column(Float, nullable=True)
+    variance_pct   = Column(Float, nullable=True)
+    flag_high_variance = Column(Boolean, default=False)
+
+class PackingRunOutput(Base):
+    __tablename__ = "packing_run_outputs"
+    id             = Column(Integer, primary_key=True, index=True)
+    run_id         = Column(Integer, ForeignKey("packing_runs.id"), nullable=False)
+    sku_id         = Column(Integer, ForeignKey("skus.id"), nullable=False)
+    qty_packed     = Column(Float, nullable=False)           # boxes packed
+    theoretical_kg = Column(Float, nullable=True)            # filled at close via BOM
+
+class PackingRunBulk(Base):
+    __tablename__ = "packing_run_bulk"
+    id             = Column(Integer, primary_key=True, index=True)
+    run_id         = Column(Integer, ForeignKey("packing_runs.id"), nullable=False)
+    bulk_sku_id    = Column(Integer, ForeignKey("skus.id"), nullable=False)
+    qty_start      = Column(Float, nullable=False)           # starting weight (kg)
+    qty_end        = Column(Float, nullable=True)            # ending weight (kg)
+    actual_used    = Column(Float, nullable=True)            # start - end
+    theoretical    = Column(Float, nullable=True)
+    variance       = Column(Float, nullable=True)            # actual - theoretical (+ = over-use)
+    variance_pct   = Column(Float, nullable=True)
+
+
 def get_engine(db_path="./wms.db"):
     import os
     db_url = os.environ.get("DATABASE_URL", "")

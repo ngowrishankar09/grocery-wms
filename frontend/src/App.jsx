@@ -49,6 +49,7 @@ import ExpiryAlerts from './pages/ExpiryAlerts'
 import BalanceSheet from './pages/BalanceSheet'
 import OnboardingWizard from './pages/OnboardingWizard'
 import OrderCheck from './pages/OrderCheck'
+import Repacking from './pages/Repacking'
 
 // ── Admin-only route guard ─────────────────────────────────────
 function AdminOnly({ children }) {
@@ -126,6 +127,7 @@ function ProtectedRoutes({ lang, setLang }) {
         <Route path="/balance-sheet"       element={<BalanceSheet />} />
         <Route path="/onboarding"          element={<OnboardingWizard />} />
         <Route path="/order-check"         element={<OrderCheck />} />
+        <Route path="/repacking"           element={<Repacking />} />
         <Route path="*"                element={<Navigate to="/app" replace />} />
       </Routes>
     </Layout>

@@ -24,6 +24,7 @@ from routers.traceability import router as traceability_router
 from routers.asn import router as asn_router
 from routers.order_check import router as order_check_router
 from routers.kpi import router as kpi_router
+from routers.repacking import router as repacking_router
 from routers.credit_notes import router as credit_notes_router
 from routers.vendor_bills import router as vendor_bills_router
 from routers.quotes import router as quotes_router
@@ -159,6 +160,9 @@ def _migrate():
         ("quotes",            "company_id",    "INTEGER"),
         # Audit Log
         ("audit_log",         "company_id",    "INTEGER"),
+        # Repacking / Production
+        ("bill_of_materials",   "company_id",    "INTEGER"),
+        ("packing_runs",        "company_id",    "INTEGER"),
     ]
     # Use IF NOT EXISTS for PostgreSQL (idempotent); fall back to try/except for SQLite
     add_col = "ADD COLUMN IF NOT EXISTS" if is_postgres else "ADD COLUMN"
@@ -586,6 +590,7 @@ app.include_router(vendor_bills_router)
 app.include_router(quotes_router)
 app.include_router(audit_log_router)
 app.include_router(order_check_router)
+app.include_router(repacking_router)
 
 # ── Static files (product images) ─────────────────────────────
 _static_dir = pathlib.Path(__file__).parent / "static" / "products"
