@@ -471,23 +471,31 @@ export const repackingAPI = {
   updateBOM:  (id, data) => api.put(`/repacking/bom/${id}`, data),
   deleteBOM:  (id)       => api.delete(`/repacking/bom/${id}`),
   // Runs
-  listRuns:   ()         => api.get('/repacking/runs'),
-  createRun:  (data)     => api.post('/repacking/runs', data),
-  getRun:     (id)       => api.get(`/repacking/runs/${id}`),
-  addOutput:  (id, data) => api.post(`/repacking/runs/${id}/output`, data),
-  removeOutput: (id, skuId) => api.delete(`/repacking/runs/${id}/output/${skuId}`),
-  closeRun:   (id, data) => api.post(`/repacking/runs/${id}/close`, data),
-  summary:    (params)   => api.get('/repacking/summary', { params }),
-  // Landed costs
+  listRuns:    ()         => api.get('/repacking/runs'),
+  createRun:   (data)     => api.post('/repacking/runs', data),
+  getRun:      (id)       => api.get(`/repacking/runs/${id}`),
+  addOutput:   (id, data) => api.post(`/repacking/runs/${id}/output`, data),
+  removeOutput:(id, skuId)=> api.delete(`/repacking/runs/${id}/output/${skuId}`),
+  addBulk:     (id, data) => api.post(`/repacking/runs/${id}/bulk`, data),
+  removeBulk:  (id, skuId)=> api.delete(`/repacking/runs/${id}/bulk/${skuId}`),
+  closeRun:    (id, data) => api.post(`/repacking/runs/${id}/close`, data),
+  summary:     (params)   => api.get('/repacking/summary', { params }),
+  // Individual landed costs (legacy / single-SKU)
   listLandedCosts:  ()         => api.get('/repacking/landed-costs'),
   createLandedCost: (data)     => api.post('/repacking/landed-costs', data),
   updateLandedCost: (id, data) => api.put(`/repacking/landed-costs/${id}`, data),
   deleteLandedCost: (id)       => api.delete(`/repacking/landed-costs/${id}`),
+  // Multi-SKU purchase batches
+  listPurchases:   ()         => api.get('/repacking/purchases'),
+  createPurchase:  (data)     => api.post('/repacking/purchases', data),
+  getPurchase:     (id)       => api.get(`/repacking/purchases/${id}`),
+  updatePurchase:  (id, data) => api.put(`/repacking/purchases/${id}`, data),
+  deletePurchase:  (id)       => api.delete(`/repacking/purchases/${id}`),
   // Run costs
-  getRunCosts:      (runId)    => api.get(`/repacking/runs/${runId}/costs`),
-  saveRunCosts:     (runId, d) => api.post(`/repacking/runs/${runId}/costs`, d),
+  getRunCosts:     (runId)    => api.get(`/repacking/runs/${runId}/costs`),
+  saveRunCosts:    (runId, d) => api.post(`/repacking/runs/${runId}/costs`, d),
   // Cost summary
-  costSummary:      (runId)    => api.get(`/repacking/runs/${runId}/cost-summary`),
+  costSummary:     (runId)    => api.get(`/repacking/runs/${runId}/cost-summary`),
 }
 
 export default api

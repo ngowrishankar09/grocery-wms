@@ -1082,21 +1082,40 @@ class PackingRunBulk(Base):
     variance_pct   = Column(Float, nullable=True)
 
 
+# ─── Purchase / Shipment Batch (multi-SKU landed cost header) ──
+class LandedCostBatch(Base):
+    """One header per purchase/shipment. Shared costs split across line items by weight."""
+    __tablename__ = "landed_cost_batches"
+    id               = Column(Integer, primary_key=True, index=True)
+    company_id       = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
+    batch_ref        = Column(String, nullable=True)        # e.g. "India Apr 2026"
+    supplier         = Column(String, nullable=True)        # e.g. "Spice World Ltd"
+    currency         = Column(String(10), default="USD")
+    # Shared costs split across all line items proportionally by kg
+    shared_freight   = Column(Float, default=0.0)           # sea/air freight
+    shared_duty      = Column(Float, default=0.0)           # import duty / customs
+    shared_overhead  = Column(Float, default=0.0)           # rent, electricity allocation
+    shared_other     = Column(Float, default=0.0)           # misc shared costs
+    notes            = Column(String, nullable=True)
+    created_at       = Column(DateTime, default=datetime.utcnow)
+
+
 # ─── Landed Cost (bulk sourcing + import costs) ───────────────
 class LandedCost(Base):
     __tablename__ = "landed_costs"
     id                    = Column(Integer, primary_key=True, index=True)
     company_id            = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
+    purchase_batch_id     = Column(Integer, ForeignKey("landed_cost_batches.id", ondelete="SET NULL"), nullable=True, index=True)
     bulk_sku_id           = Column(Integer, ForeignKey("skus.id"), nullable=False)
     batch_ref             = Column(String, nullable=True)   # e.g. "India Apr 2026"
     qty_kg                = Column(Float, nullable=False)   # total kg in this batch
-    cost_material         = Column(Float, default=0.0)      # purchase/FOB price
-    cost_freight          = Column(Float, default=0.0)      # shipping/sea freight
-    cost_duty             = Column(Float, default=0.0)      # import duty/customs
-    cost_packaging_mat    = Column(Float, default=0.0)      # boxes, bags, labels
-    cost_labor            = Column(Float, default=0.0)      # packing labor
-    cost_overhead         = Column(Float, default=0.0)      # electricity, rent share
-    cost_other            = Column(Float, default=0.0)      # misc
+    cost_material         = Column(Float, default=0.0)      # purchase/FOB price (per-SKU)
+    cost_freight          = Column(Float, default=0.0)      # allocated share of freight
+    cost_duty             = Column(Float, default=0.0)      # allocated share of duty
+    cost_packaging_mat    = Column(Float, default=0.0)      # per-SKU packaging
+    cost_labor            = Column(Float, default=0.0)      # per-SKU packing labor
+    cost_overhead         = Column(Float, default=0.0)      # allocated share of overhead
+    cost_other            = Column(Float, default=0.0)      # allocated share of other
     total_cost            = Column(Float, nullable=True)    # auto-sum of all costs
     cost_per_kg           = Column(Float, nullable=True)    # total_cost / qty_kg
     currency              = Column(String(10), default="USD")

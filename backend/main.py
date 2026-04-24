@@ -163,7 +163,8 @@ def _migrate():
         # Repacking / Production
         ("bill_of_materials",   "company_id",    "INTEGER"),
         ("packing_runs",        "company_id",     "INTEGER"),
-        ("packing_runs",        "landed_cost_id", "INTEGER"),
+        ("packing_runs",        "landed_cost_id",    "INTEGER"),
+        ("landed_costs",        "purchase_batch_id", "INTEGER"),
     ]
     # Use IF NOT EXISTS for PostgreSQL (idempotent); fall back to try/except for SQLite
     add_col = "ADD COLUMN IF NOT EXISTS" if is_postgres else "ADD COLUMN"

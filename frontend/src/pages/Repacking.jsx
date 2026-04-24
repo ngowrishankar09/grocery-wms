@@ -55,7 +55,7 @@ function SetupGuide() {
   const steps = [
     { n: 1, title: 'Create SKUs', desc: 'Go to the SKUs page and create a bulk material SKU (e.g. "Coriander Powder Bulk") and a retail output SKU (e.g. "Coriander Powder 200g Case").', tab: null },
     { n: 2, title: 'Add a Bill of Materials', desc: 'In the BOM tab, link your bulk SKU → retail SKU and enter how many kg of bulk are consumed per case packed (e.g. 4.0 kg/case for 20 × 200g sachets).', tab: 0 },
-    { n: 3, title: 'Record a Landed Cost', desc: 'In the Landed Costs tab, enter the full cost of your bulk shipment — material, freight, duty, packaging, labour, overhead. The system computes cost per kg automatically.', tab: 1 },
+    { n: 3, title: 'Record a Purchase / Shipment', desc: 'In the Purchases tab, create a new purchase batch. Add each bulk SKU received with its quantity and material cost. Enter shared freight and duty once — the system allocates them proportionally by weight and computes cost per kg per SKU.', tab: 1 },
     { n: 4, title: 'Start a Packing Run', desc: 'In the Packing Runs tab, click "New Run". Select the bulk SKU, weigh it and enter the starting weight. Optionally link the landed cost batch for accurate costing.', tab: 2 },
     { n: 5, title: 'Pack & Record Cases', desc: 'Add each product you packed and how many cases. The blue panel shows the expected weight remaining on the scale at all times.', tab: 2 },
     { n: 6, title: 'Weigh & Close', desc: 'When done, weigh the leftover bulk and close the run. The system calculates variance and flags anything above your allowed waste %.', tab: 2 },
@@ -289,190 +289,306 @@ function BOMTab({ skus }) {
   )
 }
 
-// ── Tab 2: Landed Costs ───────────────────────────────────────
-const LC_COST_FIELDS = [
-  { key: 'cost_material',      label: 'Material / FOB cost ($)' },
-  { key: 'cost_freight',       label: 'Freight / shipping ($)' },
-  { key: 'cost_duty',          label: 'Import duty / customs ($)' },
-  { key: 'cost_packaging_mat', label: 'Packaging materials ($) — boxes, bags, labels' },
-  { key: 'cost_labor',         label: 'Labor ($) — packing labour for this batch' },
-  { key: 'cost_overhead',      label: 'Overhead ($) — electricity, rent allocation' },
-  { key: 'cost_other',         label: 'Other ($)' },
-]
+// ── Tab 2: Purchases / Shipments ─────────────────────────────
+function PurchasesTab({ skus }) {
+  const [purchases, setPurchases]   = useState([])
+  const [loading, setLoading]       = useState(true)
+  const [error, setError]           = useState(null)
+  const [expandedId, setExpandedId] = useState(null)
+  const [showForm, setShowForm]     = useState(false)
+  const [editId, setEditId]         = useState(null)
+  const [saving, setSaving]         = useState(false)
+  const [formError, setFormError]   = useState(null)
+  const [deleting, setDeleting]     = useState(null)
 
-const emptyLCForm = () => ({
-  bulk_sku_id: '', batch_ref: '', qty_kg: '',
-  cost_material: '', cost_freight: '', cost_duty: '',
-  cost_packaging_mat: '', cost_labor: '', cost_overhead: '', cost_other: '',
-  currency: 'USD', notes: '',
-})
-
-function calcLCTotal(form) {
-  return LC_COST_FIELDS.reduce((sum, f) => sum + (parseFloat(form[f.key]) || 0), 0)
-}
-
-function LandedCostsTab({ skus }) {
-  const [records, setRecords]     = useState([])
-  const [loading, setLoading]     = useState(true)
-  const [error, setError]         = useState(null)
-  const [showForm, setShowForm]   = useState(false)
-  const [editId, setEditId]       = useState(null)
-  const [form, setForm]           = useState(emptyLCForm())
-  const [saving, setSaving]       = useState(false)
-  const [formError, setFormError] = useState(null)
+  const emptyLine = () => ({ bulk_sku_id: '', qty_kg: '', cost_material: '', cost_packaging_mat: '', cost_labor: '' })
+  const emptyForm = () => ({
+    batch_ref: '', supplier: '', currency: 'USD',
+    shared_freight: '', shared_duty: '', shared_overhead: '', shared_other: '',
+    notes: '',
+    lines: [emptyLine()],
+  })
+  const [form, setForm] = useState(emptyForm())
 
   const load = useCallback(async () => {
     setLoading(true); setError(null)
     try {
-      const res = await repackingAPI.listLandedCosts()
-      setRecords(res.data)
+      const res = await repackingAPI.listPurchases()
+      setPurchases(res.data)
     } catch (e) {
-      setError(e.response?.data?.detail || 'Failed to load landed costs')
+      setError(e.response?.data?.detail || 'Failed to load purchases')
     } finally { setLoading(false) }
   }, [])
 
   useEffect(() => { load() }, [load])
 
-  const openNew = () => {
-    setEditId(null); setForm(emptyLCForm()); setFormError(null); setShowForm(true)
+  // Live cost-per-kg preview for one line
+  const calcLinePreview = (lineIdx) => {
+    const line   = form.lines[lineIdx]
+    const lineKg = parseFloat(line.qty_kg) || 0
+    if (lineKg === 0) return null
+    const totalKg     = form.lines.reduce((s, l) => s + (parseFloat(l.qty_kg) || 0), 0) || 1
+    const weightShare = lineKg / totalKg
+    const allocFreight  = (parseFloat(form.shared_freight)  || 0) * weightShare
+    const allocDuty     = (parseFloat(form.shared_duty)     || 0) * weightShare
+    const allocOverhead = (parseFloat(form.shared_overhead) || 0) * weightShare
+    const allocOther    = (parseFloat(form.shared_other)    || 0) * weightShare
+    const lineCost =
+      (parseFloat(line.cost_material)      || 0) +
+      (parseFloat(line.cost_packaging_mat) || 0) +
+      (parseFloat(line.cost_labor)         || 0) +
+      allocFreight + allocDuty + allocOverhead + allocOther
+    return lineCost / lineKg
   }
 
-  const openEdit = (lc) => {
-    setEditId(lc.id)
-    setForm({
-      bulk_sku_id:        String(lc.bulk_sku_id),
-      batch_ref:          lc.batch_ref || '',
-      qty_kg:             String(lc.qty_kg),
-      cost_material:      String(lc.cost_material ?? 0),
-      cost_freight:       String(lc.cost_freight ?? 0),
-      cost_duty:          String(lc.cost_duty ?? 0),
-      cost_packaging_mat: String(lc.cost_packaging_mat ?? 0),
-      cost_labor:         String(lc.cost_labor ?? 0),
-      cost_overhead:      String(lc.cost_overhead ?? 0),
-      cost_other:         String(lc.cost_other ?? 0),
-      currency:           lc.currency || 'USD',
-      notes:              lc.notes || '',
-    })
-    setFormError(null); setShowForm(true)
+  const addLine    = () => setForm(f => ({ ...f, lines: [...f.lines, emptyLine()] }))
+  const removeLine = (i) => {
+    if (form.lines.length <= 1) return
+    setForm(f => ({ ...f, lines: f.lines.filter((_, idx) => idx !== i) }))
+  }
+  const updateLine = (i, key, val) => setForm(f => {
+    const lines = [...f.lines]; lines[i] = { ...lines[i], [key]: val }; return { ...f, lines }
+  })
+
+  const openNew = () => {
+    setEditId(null); setForm(emptyForm()); setFormError(null); setShowForm(true)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  const openEdit = async (purchase) => {
+    setEditId(purchase.id); setFormError(null); setShowForm(true)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+    try {
+      const res = await repackingAPI.getPurchase(purchase.id)
+      const d = res.data
+      setForm({
+        batch_ref:       d.batch_ref      || '',
+        supplier:        d.supplier       || '',
+        currency:        d.currency       || 'USD',
+        shared_freight:  String(d.shared_freight  ?? 0),
+        shared_duty:     String(d.shared_duty     ?? 0),
+        shared_overhead: String(d.shared_overhead ?? 0),
+        shared_other:    String(d.shared_other    ?? 0),
+        notes:           d.notes || '',
+        lines: (d.items || []).map(item => ({
+          bulk_sku_id:        String(item.bulk_sku_id),
+          qty_kg:             String(item.qty_kg),
+          cost_material:      String(item.cost_material      ?? 0),
+          cost_packaging_mat: String(item.cost_packaging_mat ?? 0),
+          cost_labor:         String(item.cost_labor         ?? 0),
+        })),
+      })
+    } catch (e) {
+      setFormError(e.response?.data?.detail || 'Failed to load purchase details')
+    }
   }
 
   const handleSubmit = async (e) => {
     e.preventDefault(); setFormError(null)
-    if (!form.bulk_sku_id || !form.qty_kg) {
-      setFormError('Please select a bulk SKU and enter quantity kg.'); return
+    const validLines = form.lines.filter(l => l.bulk_sku_id && l.qty_kg)
+    if (validLines.length === 0) {
+      setFormError('Please add at least one SKU line with a quantity.'); return
     }
     const payload = {
-      bulk_sku_id:        parseInt(form.bulk_sku_id),
-      batch_ref:          form.batch_ref || null,
-      qty_kg:             parseFloat(form.qty_kg),
-      cost_material:      parseFloat(form.cost_material) || 0,
-      cost_freight:       parseFloat(form.cost_freight) || 0,
-      cost_duty:          parseFloat(form.cost_duty) || 0,
-      cost_packaging_mat: parseFloat(form.cost_packaging_mat) || 0,
-      cost_labor:         parseFloat(form.cost_labor) || 0,
-      cost_overhead:      parseFloat(form.cost_overhead) || 0,
-      cost_other:         parseFloat(form.cost_other) || 0,
-      currency:           form.currency,
-      notes:              form.notes || null,
+      batch_ref:       form.batch_ref  || null,
+      supplier:        form.supplier   || null,
+      currency:        form.currency,
+      shared_freight:  parseFloat(form.shared_freight)  || 0,
+      shared_duty:     parseFloat(form.shared_duty)     || 0,
+      shared_overhead: parseFloat(form.shared_overhead) || 0,
+      shared_other:    parseFloat(form.shared_other)    || 0,
+      notes:           form.notes || null,
+      lines: validLines.map(l => ({
+        bulk_sku_id:        parseInt(l.bulk_sku_id),
+        qty_kg:             parseFloat(l.qty_kg),
+        cost_material:      parseFloat(l.cost_material)      || 0,
+        cost_packaging_mat: parseFloat(l.cost_packaging_mat) || 0,
+        cost_labor:         parseFloat(l.cost_labor)         || 0,
+      })),
     }
     setSaving(true)
     try {
       if (editId) {
-        await repackingAPI.updateLandedCost(editId, payload)
+        await repackingAPI.updatePurchase(editId, payload)
       } else {
-        await repackingAPI.createLandedCost(payload)
+        await repackingAPI.createPurchase(payload)
       }
-      setShowForm(false); setEditId(null); setForm(emptyLCForm()); load()
+      setShowForm(false); setEditId(null); setForm(emptyForm()); load()
     } catch (e) {
-      setFormError(e.response?.data?.detail || 'Failed to save landed cost')
+      setFormError(e.response?.data?.detail || 'Failed to save purchase')
     } finally { setSaving(false) }
   }
 
   const handleDelete = async (id) => {
-    if (!window.confirm('Delete this landed cost record?')) return
-    try { await repackingAPI.deleteLandedCost(id); load() }
+    if (!window.confirm('Delete this purchase batch? All associated cost records will also be deleted.')) return
+    setDeleting(id)
+    try { await repackingAPI.deletePurchase(id); load() }
     catch (e) { alert(e.response?.data?.detail || 'Failed to delete') }
+    finally { setDeleting(null) }
   }
 
-  const runningTotal = calcLCTotal(form)
-  const costPerKgPreview = form.qty_kg && parseFloat(form.qty_kg) > 0
-    ? (runningTotal / parseFloat(form.qty_kg)).toFixed(4)
-    : null
+  const totalSharedCost =
+    (parseFloat(form.shared_freight)  || 0) +
+    (parseFloat(form.shared_duty)     || 0) +
+    (parseFloat(form.shared_overhead) || 0) +
+    (parseFloat(form.shared_other)    || 0)
 
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h2 className="text-lg font-semibold text-gray-800">Landed Costs</h2>
+          <h2 className="text-lg font-semibold text-gray-800">Purchases / Shipments</h2>
           <p className="text-sm text-gray-500 mt-0.5">
-            Record the full cost of each bulk sourcing batch — material, freight, duty, labour and overhead — to compute an accurate cost per kg.
+            Record multi-SKU purchase shipments. Shared freight, duty &amp; overhead are auto-allocated proportionally by weight to each bulk SKU line.
           </p>
         </div>
         <button onClick={openNew} className="btn-primary flex items-center gap-1.5">
-          <Plus size={15} /> Add Landed Cost
+          <Plus size={15} /> New Purchase
         </button>
       </div>
 
       {showForm && (
-        <div className="card mb-4 border border-green-200 bg-green-50">
-          <h3 className="font-semibold text-gray-800 mb-3">
-            {editId ? '✏️ Edit Landed Cost' : 'New Landed Cost'}
+        <div className="card mb-6 border border-green-200 bg-green-50">
+          <h3 className="font-semibold text-gray-800 mb-4">
+            {editId ? '✏️ Edit Purchase Batch' : '📦 New Purchase Batch'}
           </h3>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Bulk SKU <span className="text-red-500">*</span></label>
-                <select className="input w-full" value={form.bulk_sku_id} onChange={e => setForm(f => ({ ...f, bulk_sku_id: e.target.value }))} required>
-                  <option value="">Select bulk SKU…</option>
-                  {skus.map(s => <option key={s.id} value={s.id}>{s.product_name} ({s.sku_code})</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Batch Reference</label>
-                <input type="text" className="input w-full" placeholder="e.g. India Apr 2026" value={form.batch_ref} onChange={e => setForm(f => ({ ...f, batch_ref: e.target.value }))} />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Total Qty (kg) <span className="text-red-500">*</span></label>
-                <input type="number" step="0.001" min="0.001" className="input w-full" placeholder="e.g. 5000" value={form.qty_kg} onChange={e => setForm(f => ({ ...f, qty_kg: e.target.value }))} required />
+          <form onSubmit={handleSubmit} className="space-y-5">
+
+            {/* ── Shipment header ─────────────────────────────── */}
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Shipment Details</p>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Batch Reference</label>
+                  <input type="text" className="input w-full" placeholder="e.g. India Apr 2026" value={form.batch_ref} onChange={e => setForm(f => ({ ...f, batch_ref: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Supplier</label>
+                  <input type="text" className="input w-full" placeholder="e.g. Spice Traders Ltd" value={form.supplier} onChange={e => setForm(f => ({ ...f, supplier: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Currency</label>
+                  <select className="input w-full" value={form.currency} onChange={e => setForm(f => ({ ...f, currency: e.target.value }))}>
+                    {['USD','AUD','EUR','GBP','CAD','INR','NZD'].map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
               </div>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-              {LC_COST_FIELDS.map(({ key, label }) => (
-                <div key={key}>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">{label}</label>
-                  <input type="number" step="0.01" min="0" className="input w-full" placeholder="0.00" value={form[key]} onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))} />
-                </div>
-              ))}
-            </div>
-            <div className="bg-white border border-green-300 rounded-lg px-4 py-3 flex items-center justify-between">
-              <div>
-                <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">Running Total</p>
-                <p className="text-2xl font-black text-green-700">{fmt$(runningTotal)}</p>
+
+            {/* ── Shared costs ────────────────────────────────── */}
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">
+                Shared Costs
+                <span className="ml-1 font-normal text-gray-400 normal-case">— entered once, split proportionally by weight across all SKU lines</span>
+              </p>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {[
+                  { key: 'shared_freight',  label: 'Freight / Shipping ($)' },
+                  { key: 'shared_duty',     label: 'Import Duty ($)' },
+                  { key: 'shared_overhead', label: 'Overhead ($)' },
+                  { key: 'shared_other',    label: 'Other Shared ($)' },
+                ].map(({ key, label }) => (
+                  <div key={key}>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">{label}</label>
+                    <input type="number" step="0.01" min="0" className="input w-full" placeholder="0.00"
+                      value={form[key]} onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))} />
+                  </div>
+                ))}
               </div>
-              {costPerKgPreview && (
-                <div className="text-right">
-                  <p className="text-xs text-gray-500">Cost per kg</p>
-                  <p className="text-xl font-bold text-gray-800">${costPerKgPreview}/kg</p>
-                </div>
+              {totalSharedCost > 0 && (
+                <p className="text-xs text-green-700 mt-1.5 font-medium">
+                  Total shared: ${totalSharedCost.toFixed(2)} — will be proportionally allocated below
+                </p>
               )}
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Currency</label>
-                <select className="input w-full" value={form.currency} onChange={e => setForm(f => ({ ...f, currency: e.target.value }))}>
-                  {['USD','AUD','EUR','GBP','CAD','INR','NZD'].map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
+
+            {/* ── SKU Lines ───────────────────────────────────── */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                  SKU Lines <span className="font-normal text-gray-400 normal-case ml-1">— add each bulk material in this shipment</span>
+                </p>
+                <button type="button" onClick={addLine} className="text-xs text-blue-600 hover:text-blue-800 font-semibold flex items-center gap-1">
+                  <Plus size={12} /> Add SKU
+                </button>
               </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Notes</label>
-                <input type="text" className="input w-full" placeholder="Optional notes…" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
+              <div className="space-y-3">
+                {form.lines.map((line, i) => {
+                  const preview    = calcLinePreview(i)
+                  const totalKg    = form.lines.reduce((s, l) => s + (parseFloat(l.qty_kg) || 0), 0)
+                  const lineKg     = parseFloat(line.qty_kg) || 0
+                  const shareLabel = totalKg > 0 && lineKg > 0
+                    ? `${((lineKg / totalKg) * 100).toFixed(1)}% of weight → $${((totalSharedCost * lineKg) / totalKg).toFixed(2)} shared`
+                    : null
+                  return (
+                    <div key={i} className="bg-white border border-gray-200 rounded-xl p-3 shadow-sm">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-bold text-gray-500 uppercase tracking-wide">SKU #{i + 1}</span>
+                        {form.lines.length > 1 && (
+                          <button type="button" onClick={() => removeLine(i)} className="text-gray-300 hover:text-red-500 p-0.5 rounded transition-colors" title="Remove line">
+                            <X size={13} />
+                          </button>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-2">
+                        <div className="md:col-span-2">
+                          <label className="block text-xs font-medium text-gray-700 mb-1">Bulk SKU <span className="text-red-500">*</span></label>
+                          <select className="input w-full text-sm" value={line.bulk_sku_id}
+                            onChange={e => updateLine(i, 'bulk_sku_id', e.target.value)} required>
+                            <option value="">Select bulk SKU…</option>
+                            {skus.map(s => <option key={s.id} value={s.id}>{s.product_name} ({s.sku_code})</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">Qty (kg) <span className="text-red-500">*</span></label>
+                          <input type="number" step="0.001" min="0.001" className="input w-full text-sm" placeholder="e.g. 1000"
+                            value={line.qty_kg} onChange={e => updateLine(i, 'qty_kg', e.target.value)} required />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">Material Cost ($)</label>
+                          <input type="number" step="0.01" min="0" className="input w-full text-sm" placeholder="0.00"
+                            value={line.cost_material} onChange={e => updateLine(i, 'cost_material', e.target.value)} />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">Packaging ($)</label>
+                          <input type="number" step="0.01" min="0" className="input w-full text-sm" placeholder="0.00"
+                            value={line.cost_packaging_mat} onChange={e => updateLine(i, 'cost_packaging_mat', e.target.value)} />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">Labor ($)</label>
+                          <input type="number" step="0.01" min="0" className="input w-full text-sm" placeholder="0.00"
+                            value={line.cost_labor} onChange={e => updateLine(i, 'cost_labor', e.target.value)} />
+                        </div>
+                      </div>
+                      {/* Live preview */}
+                      {preview != null && (
+                        <div className="mt-2 flex flex-wrap items-center gap-3">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-xs text-gray-500">Allocated cost/kg:</span>
+                            <span className="text-sm font-bold text-green-700">${preview.toFixed(4)}/kg</span>
+                          </div>
+                          {shareLabel && (
+                            <span className="text-xs text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">{shareLabel}</span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
             </div>
+
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Notes</label>
+              <input type="text" className="input w-full" placeholder="Optional notes…"
+                value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
+            </div>
+
             {formError && <p className="text-sm text-red-600 flex items-center gap-1"><AlertTriangle size={14} /> {formError}</p>}
             <div className="flex gap-2">
               <button type="submit" className="btn-primary flex items-center gap-1.5" disabled={saving}>
                 {saving && <Loader2 size={14} className="animate-spin" />}
-                {editId ? 'Update' : 'Save'} Landed Cost
+                {editId ? 'Update Purchase' : 'Save Purchase'}
               </button>
               <button type="button" className="btn-secondary" onClick={() => { setShowForm(false); setEditId(null) }}>Cancel</button>
             </div>
@@ -484,66 +600,114 @@ function LandedCostsTab({ skus }) {
         <div className="flex justify-center py-12"><Loader2 className="animate-spin text-blue-500" size={28} /></div>
       ) : error ? (
         <div className="card text-red-600 flex items-center gap-2"><AlertTriangle size={18} /> {error}</div>
-      ) : records.length === 0 ? (
+      ) : purchases.length === 0 ? (
         <div className="card text-center py-12 text-gray-400">
           <DollarSign size={36} className="mx-auto mb-3 opacity-30" />
-          <p className="font-medium">No landed costs recorded yet.</p>
-          <p className="text-sm mt-1">Add a landed cost to track the true cost per kg of each bulk batch.</p>
-          <button onClick={openNew} className="btn-primary mt-4 mx-auto">+ Add First Landed Cost</button>
+          <p className="font-medium">No purchase batches recorded yet.</p>
+          <p className="text-sm mt-1">Create a purchase to track costs across multiple bulk SKUs in one shipment.</p>
+          <button onClick={openNew} className="btn-primary mt-4 mx-auto">+ New Purchase</button>
         </div>
       ) : (
-        <div className="card p-0 overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 text-xs text-gray-500 uppercase tracking-wide">
-              <tr>
-                <th className="px-4 py-3 text-left">Batch Ref</th>
-                <th className="px-4 py-3 text-left">Bulk SKU</th>
-                <th className="px-4 py-3 text-right">Qty (kg)</th>
-                <th className="px-4 py-3 text-right">Material</th>
-                <th className="px-4 py-3 text-right">Freight</th>
-                <th className="px-4 py-3 text-right">Duty</th>
-                <th className="px-4 py-3 text-right">Pkg Mat</th>
-                <th className="px-4 py-3 text-right">Labor</th>
-                <th className="px-4 py-3 text-right">Overhead</th>
-                <th className="px-4 py-3 text-right">Other</th>
-                <th className="px-4 py-3 text-right font-bold text-gray-700">Total</th>
-                <th className="px-4 py-3 text-right font-bold text-gray-700">Cost/kg</th>
-                <th className="px-4 py-3 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {records.map(lc => (
-                <tr key={lc.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-3">
-                    <div className="font-medium text-gray-800">{lc.batch_ref || '—'}</div>
-                    <div className="text-xs text-gray-400">{lc.currency} · {new Date(lc.created_at).toLocaleDateString()}</div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="font-medium text-gray-800">{lc.bulk_sku_name}</div>
-                    <div className="text-xs text-gray-400">{lc.bulk_sku_code}</div>
-                  </td>
-                  <td className="px-4 py-3 text-right font-mono">{(+lc.qty_kg).toFixed(2)}</td>
-                  <td className="px-4 py-3 text-right font-mono">{fmt$(lc.cost_material)}</td>
-                  <td className="px-4 py-3 text-right font-mono">{fmt$(lc.cost_freight)}</td>
-                  <td className="px-4 py-3 text-right font-mono">{fmt$(lc.cost_duty)}</td>
-                  <td className="px-4 py-3 text-right font-mono">{fmt$(lc.cost_packaging_mat)}</td>
-                  <td className="px-4 py-3 text-right font-mono">{fmt$(lc.cost_labor)}</td>
-                  <td className="px-4 py-3 text-right font-mono">{fmt$(lc.cost_overhead)}</td>
-                  <td className="px-4 py-3 text-right font-mono">{fmt$(lc.cost_other)}</td>
-                  <td className="px-4 py-3 text-right font-mono font-bold text-gray-800">{fmt$(lc.total_cost)}</td>
-                  <td className="px-4 py-3 text-right font-mono font-bold text-green-700">
-                    {lc.cost_per_kg != null ? `$${(+lc.cost_per_kg).toFixed(4)}/kg` : '—'}
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <div className="flex items-center justify-end gap-1">
-                      <button onClick={() => openEdit(lc)} className="p-1.5 text-gray-400 hover:text-blue-500 rounded transition-colors" title="Edit"><Edit2 size={13} /></button>
-                      <button onClick={() => handleDelete(lc.id)} className="p-1.5 text-gray-400 hover:text-red-500 rounded transition-colors" title="Delete"><Trash2 size={13} /></button>
+        <div className="space-y-3">
+          {purchases.map(purchase => (
+            <div key={purchase.id} className="card p-0 overflow-hidden border border-gray-200">
+              {/* Batch header */}
+              <div
+                className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-gray-50 transition-colors"
+                onClick={() => setExpandedId(expandedId === purchase.id ? null : purchase.id)}
+              >
+                <div className="flex items-center gap-3">
+                  <span className={`text-gray-400 transition-transform duration-150 ${expandedId === purchase.id ? 'rotate-180' : ''}`}>
+                    <ChevronDown size={16} />
+                  </span>
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-semibold text-gray-800">{purchase.batch_ref || `Batch #${purchase.id}`}</span>
+                      {purchase.supplier && <span className="text-xs text-gray-500">· {purchase.supplier}</span>}
+                      <span className="text-xs px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded font-mono">{purchase.currency}</span>
                     </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                    <div className="text-xs text-gray-400 mt-0.5">
+                      {purchase.created_at ? new Date(purchase.created_at).toLocaleDateString() : '—'}
+                      {' · '}{purchase.items?.length ?? 0} SKU{(purchase.items?.length ?? 0) !== 1 ? 's' : ''}
+                      {purchase.total_kg > 0 && ` · ${(+purchase.total_kg).toFixed(0)} kg total`}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-4">
+                  <div className="text-right hidden sm:block">
+                    <div className="text-sm font-bold text-gray-800">{fmt$(purchase.total_cost)}</div>
+                    <div className="text-xs text-gray-400">total cost</div>
+                  </div>
+                  <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                    <button onClick={() => openEdit(purchase)} className="p-1.5 text-gray-400 hover:text-blue-500 rounded transition-colors" title="Edit"><Edit2 size={13} /></button>
+                    <button onClick={() => handleDelete(purchase.id)} className="p-1.5 text-gray-400 hover:text-red-500 rounded transition-colors" title="Delete" disabled={deleting === purchase.id}>
+                      {deleting === purchase.id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Expanded detail */}
+              {expandedId === purchase.id && (
+                <div className="border-t border-gray-100">
+                  {/* Shared costs pills */}
+                  {(purchase.shared_freight > 0 || purchase.shared_duty > 0 || purchase.shared_overhead > 0 || purchase.shared_other > 0) && (
+                    <div className="px-4 py-2 bg-blue-50 flex flex-wrap gap-3 text-xs text-blue-800 border-b border-blue-100">
+                      <span className="font-semibold">Shared costs:</span>
+                      {purchase.shared_freight  > 0 && <span className="bg-blue-100 px-2 py-0.5 rounded-full">Freight {fmt$(purchase.shared_freight)}</span>}
+                      {purchase.shared_duty     > 0 && <span className="bg-blue-100 px-2 py-0.5 rounded-full">Duty {fmt$(purchase.shared_duty)}</span>}
+                      {purchase.shared_overhead > 0 && <span className="bg-blue-100 px-2 py-0.5 rounded-full">Overhead {fmt$(purchase.shared_overhead)}</span>}
+                      {purchase.shared_other    > 0 && <span className="bg-blue-100 px-2 py-0.5 rounded-full">Other {fmt$(purchase.shared_other)}</span>}
+                    </div>
+                  )}
+                  {purchase.items?.length > 0 ? (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead className="bg-gray-50 text-xs text-gray-500 uppercase tracking-wide">
+                          <tr>
+                            <th className="px-4 py-2 text-left pl-10">Bulk SKU</th>
+                            <th className="px-4 py-2 text-right">Qty (kg)</th>
+                            <th className="px-4 py-2 text-right">Material</th>
+                            <th className="px-4 py-2 text-right text-blue-600">Freight alloc</th>
+                            <th className="px-4 py-2 text-right text-blue-600">Duty alloc</th>
+                            <th className="px-4 py-2 text-right">Pkg Mat</th>
+                            <th className="px-4 py-2 text-right">Labor</th>
+                            <th className="px-4 py-2 text-right font-bold text-gray-700">Total</th>
+                            <th className="px-4 py-2 text-right font-bold text-green-700">Cost/kg</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                          {purchase.items.map((item, idx) => (
+                            <tr key={idx} className="hover:bg-gray-50">
+                              <td className="px-4 py-2.5 pl-10">
+                                <div className="font-medium text-gray-800">{item.bulk_sku_name}</div>
+                                <div className="text-xs text-gray-400">{item.bulk_sku_code}</div>
+                              </td>
+                              <td className="px-4 py-2.5 text-right font-mono">{(+item.qty_kg).toFixed(2)}</td>
+                              <td className="px-4 py-2.5 text-right font-mono">{fmt$(item.cost_material)}</td>
+                              <td className="px-4 py-2.5 text-right font-mono text-blue-700">{fmt$(item.cost_freight)}</td>
+                              <td className="px-4 py-2.5 text-right font-mono text-blue-700">{fmt$(item.cost_duty)}</td>
+                              <td className="px-4 py-2.5 text-right font-mono">{fmt$(item.cost_packaging_mat)}</td>
+                              <td className="px-4 py-2.5 text-right font-mono">{fmt$(item.cost_labor)}</td>
+                              <td className="px-4 py-2.5 text-right font-mono font-bold text-gray-800">{fmt$(item.total_cost)}</td>
+                              <td className="px-4 py-2.5 text-right font-mono font-bold text-green-700">
+                                {item.cost_per_kg != null ? `$${(+item.cost_per_kg).toFixed(4)}/kg` : '—'}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <p className="px-4 py-3 text-sm text-gray-400 italic">No SKU lines found.</p>
+                  )}
+                  {purchase.notes && (
+                    <div className="px-4 py-2 text-xs text-gray-500 italic border-t border-gray-100 bg-gray-50">{purchase.notes}</div>
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
         </div>
       )}
     </div>
@@ -797,6 +961,12 @@ function RunsTab({ skus, landedCosts }) {
   const [closing, setClosing]         = useState(false)
   const [closeError, setCloseError]   = useState(null)
 
+  // Add-bulk-material to open run
+  const [showAddBulk, setShowAddBulk]   = useState(false)
+  const [addBulkForm, setAddBulkForm]   = useState({ bulk_sku_id: '', qty_start: '' })
+  const [addBulkError, setAddBulkError] = useState(null)
+  const [addingBulk, setAddingBulk]     = useState(false)
+
   const loadRuns = useCallback(async () => {
     setLoading(true); setError(null)
     try {
@@ -825,6 +995,8 @@ function RunsTab({ skus, landedCosts }) {
     setShowAddOutput(false)
     setShowClose(false)
     setCloseError(null)
+    setShowAddBulk(false)
+    setAddBulkError(null)
     loadDetail(run.id)
   }
 
@@ -877,6 +1049,25 @@ function RunsTab({ skus, landedCosts }) {
       await repackingAPI.removeOutput(runDetail.id, skuId)
       loadDetail(runDetail.id)
     } catch (e) { alert(e.response?.data?.detail || 'Failed to remove output') }
+  }
+
+  const handleAddBulk = async (e) => {
+    e.preventDefault(); setAddBulkError(null)
+    if (!addBulkForm.bulk_sku_id || !addBulkForm.qty_start) {
+      setAddBulkError('Please select a bulk SKU and enter starting weight.'); return
+    }
+    setAddingBulk(true)
+    try {
+      await repackingAPI.addBulk(runDetail.id, {
+        bulk_sku_id: parseInt(addBulkForm.bulk_sku_id),
+        qty_start:   parseFloat(addBulkForm.qty_start),
+      })
+      setShowAddBulk(false)
+      setAddBulkForm({ bulk_sku_id: '', qty_start: '' })
+      loadDetail(runDetail.id)
+    } catch (e) {
+      setAddBulkError(e.response?.data?.detail || 'Failed to add bulk material')
+    } finally { setAddingBulk(false) }
   }
 
   const handleCloseRun = async (e) => {
@@ -1121,7 +1312,49 @@ function RunsTab({ skus, landedCosts }) {
 
             {/* Bulk usage section */}
             <div className="card">
-              <h3 className="font-semibold text-gray-800 mb-3">Bulk Material Usage</h3>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-semibold text-gray-800">Bulk Material Usage</h3>
+                {runDetail.status === 'open' && (
+                  <button
+                    onClick={() => { setShowAddBulk(s => !s); setAddBulkError(null) }}
+                    className="btn-secondary flex items-center gap-1.5 text-sm"
+                  >
+                    <Plus size={14} /> Add Bulk Material
+                  </button>
+                )}
+              </div>
+
+              {showAddBulk && runDetail.status === 'open' && (
+                <form onSubmit={handleAddBulk} className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg space-y-2">
+                  <p className="text-xs font-semibold text-blue-800 mb-1">Add another bulk material to this run (e.g. a second spice added mid-run)</p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">Bulk SKU</label>
+                      <select className="input w-full" value={addBulkForm.bulk_sku_id}
+                        onChange={e => setAddBulkForm(f => ({ ...f, bulk_sku_id: e.target.value }))} required>
+                        <option value="">Select bulk material…</option>
+                        {skus
+                          .filter(s => !runDetail.bulk_entries.some(b => b.bulk_sku_id === s.id))
+                          .map(s => <option key={s.id} value={s.id}>{s.product_name} ({s.sku_code})</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">Starting Weight (kg)</label>
+                      <input type="number" step="0.001" min="0.001" className="input w-full"
+                        placeholder="e.g. 500" value={addBulkForm.qty_start}
+                        onChange={e => setAddBulkForm(f => ({ ...f, qty_start: e.target.value }))} required />
+                    </div>
+                  </div>
+                  {addBulkError && <p className="text-xs text-red-600 flex items-center gap-1"><AlertTriangle size={12} /> {addBulkError}</p>}
+                  <div className="flex gap-2">
+                    <button type="submit" className="btn-primary text-sm" disabled={addingBulk}>
+                      {addingBulk && <Loader2 size={13} className="animate-spin inline mr-1" />} Add Material
+                    </button>
+                    <button type="button" className="btn-secondary text-sm" onClick={() => setShowAddBulk(false)}>Cancel</button>
+                  </div>
+                </form>
+              )}
+
               {runDetail.bulk_entries.length === 0 ? (
                 <p className="text-sm text-gray-400">No bulk entries.</p>
               ) : (
@@ -1654,7 +1887,7 @@ function SummaryTab() {
 }
 
 // ── Main Repacking page ───────────────────────────────────────
-const TABS = ['Bills of Materials', 'Landed Costs', 'Packing Runs', 'Summary']
+const TABS = ['Bills of Materials', 'Purchases', 'Packing Runs', 'Summary']
 
 export default function Repacking() {
   const [activeTab, setActiveTab]       = useState(2)
@@ -1686,10 +1919,12 @@ export default function Repacking() {
     init()
   }, [])
 
-  // Refresh landed costs when user switches to that tab (they may have added one)
+  // Refresh landed costs when user switches to Purchases or Packing Runs tab
   const handleTabChange = async (i) => {
     setActiveTab(i)
-    if (i === 1) {
+    // Always refresh landed cost list when switching to Purchases (tab 1) or Packing Runs (tab 2),
+    // so that the "Link Landed Cost Batch" dropdown in new-run form stays up to date.
+    if (i === 1 || i === 2) {
       try {
         const res = await repackingAPI.listLandedCosts()
         setLandedCosts(Array.isArray(res.data) ? res.data : [])
@@ -1747,7 +1982,7 @@ export default function Repacking() {
       ) : (
         <>
           {activeTab === 0 && <BOMTab skus={skus} />}
-          {activeTab === 1 && <LandedCostsTab skus={skus} />}
+          {activeTab === 1 && <PurchasesTab skus={skus} />}
           {activeTab === 2 && <RunsTab skus={skus} landedCosts={landedCosts} />}
           {activeTab === 3 && <SummaryTab />}
         </>

@@ -16,7 +16,7 @@ from datetime import datetime, date
 import sys, os
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from database import get_db
-from models import BillOfMaterial, PackingRun, PackingRunOutput, PackingRunBulk, SKU, LandedCost, PackingRunCost
+from models import BillOfMaterial, PackingRun, PackingRunOutput, PackingRunBulk, SKU, LandedCost, PackingRunCost, LandedCostBatch
 from security import get_current_user, get_company_id
 
 router = APIRouter(prefix="/repacking", tags=["Repacking"])
@@ -69,6 +69,35 @@ class PackingRunCostIn(BaseModel):
     cost_other:         float          = 0.0
     labor_hours:        Optional[float] = None
     notes:              Optional[str]  = None
+
+
+# ── Purchase / Shipment schemas ──────────────────────────────────
+
+class PurchaseLineIn(BaseModel):
+    """One product line inside a multi-SKU purchase."""
+    bulk_sku_id:       int
+    qty_kg:            float
+    cost_material:     float = 0.0   # FOB / per-SKU material cost
+    cost_packaging_mat: float = 0.0  # per-SKU packaging
+    cost_labor:        float = 0.0   # per-SKU labor
+
+class PurchaseBatchIn(BaseModel):
+    """Header for a whole shipment.  Shared costs auto-split by weight across lines."""
+    batch_ref:       Optional[str]  = None
+    supplier:        Optional[str]  = None
+    currency:        str            = "USD"
+    shared_freight:  float          = 0.0
+    shared_duty:     float          = 0.0
+    shared_overhead: float          = 0.0
+    shared_other:    float          = 0.0
+    notes:           Optional[str]  = None
+    lines:           List[PurchaseLineIn]
+
+
+class BulkAddIn(BaseModel):
+    """Add an extra bulk material to an existing open packing run."""
+    bulk_sku_id: int
+    qty_start:   float
 
 
 # ── Helpers ──────────────────────────────────────────────────────
@@ -607,7 +636,88 @@ def get_summary(
     }
 
 
-# ── Landed Cost helpers ──────────────────────────────────────────
+# ── Purchase batch helpers ───────────────────────────────────────
+
+def _allocate_and_save_lines(
+    db: Session,
+    batch: LandedCostBatch,
+    lines: List[PurchaseLineIn],
+    company_id: int,
+    existing_lcs: list = None,   # pass to update in-place instead of inserting
+):
+    """
+    For each line, compute its proportional share of the batch's shared costs,
+    create (or update) LandedCost rows, and return the list.
+    """
+    total_kg = sum(l.qty_kg for l in lines) or 1.0
+    shared_total = batch.shared_freight + batch.shared_duty + batch.shared_overhead + batch.shared_other
+    results = []
+    for i, line in enumerate(lines):
+        weight_share = line.qty_kg / total_kg
+        alloc_freight  = round(batch.shared_freight  * weight_share, 4)
+        alloc_duty     = round(batch.shared_duty     * weight_share, 4)
+        alloc_overhead = round(batch.shared_overhead * weight_share, 4)
+        alloc_other    = round(batch.shared_other    * weight_share, 4)
+
+        per_sku_costs = {
+            "cost_material":      line.cost_material,
+            "cost_freight":       alloc_freight,
+            "cost_duty":          alloc_duty,
+            "cost_packaging_mat": line.cost_packaging_mat,
+            "cost_labor":         line.cost_labor,
+            "cost_overhead":      alloc_overhead,
+            "cost_other":         alloc_other,
+        }
+        totals = _compute_landed_totals({**per_sku_costs, "qty_kg": line.qty_kg})
+
+        if existing_lcs and i < len(existing_lcs):
+            lc = existing_lcs[i]
+            lc.bulk_sku_id      = line.bulk_sku_id
+            lc.qty_kg           = line.qty_kg
+            lc.batch_ref        = batch.batch_ref
+            lc.currency         = batch.currency
+        else:
+            lc = LandedCost(
+                company_id        = company_id,
+                purchase_batch_id = batch.id,
+                bulk_sku_id       = line.bulk_sku_id,
+                qty_kg            = line.qty_kg,
+                batch_ref         = batch.batch_ref,
+                currency          = batch.currency,
+            )
+            db.add(lc)
+
+        for field, val in per_sku_costs.items():
+            setattr(lc, field, val)
+        lc.total_cost  = totals["total_cost"]
+        lc.cost_per_kg = totals["cost_per_kg"]
+        results.append(lc)
+
+    return results
+
+
+def _fmt_batch(batch: LandedCostBatch, db: Session) -> dict:
+    items = db.query(LandedCost).filter(LandedCost.purchase_batch_id == batch.id).all()
+    total_kg   = sum(i.qty_kg or 0   for i in items)
+    total_cost = sum(i.total_cost or 0 for i in items)
+    return {
+        "id":             batch.id,
+        "batch_ref":      batch.batch_ref,
+        "supplier":       batch.supplier,
+        "currency":       batch.currency,
+        "shared_freight": batch.shared_freight,
+        "shared_duty":    batch.shared_duty,
+        "shared_overhead": batch.shared_overhead,
+        "shared_other":   batch.shared_other,
+        "notes":          batch.notes,
+        "created_at":     batch.created_at.isoformat() if batch.created_at else None,
+        "total_kg":       round(total_kg, 3),
+        "total_cost":     round(total_cost, 4),
+        "items": [_fmt_landed(i, db) for i in items],
+    }
+
+
+# ── Landed Cost helpers ───────────────────────────────────────────
 
 def _compute_landed_totals(body_dict: dict) -> dict:
     """Given the cost fields, compute total_cost and cost_per_kg."""
@@ -743,6 +853,198 @@ def delete_landed_cost(
     if not lc:
         raise HTTPException(status_code=404, detail="Landed cost not found")
     db.delete(lc)
+    db.commit()
+    return None
+
+
+# ── Purchase Batch endpoints ─────────────────────────────────────
+
+@router.get("/purchases")
+def list_purchases(
+    db:         Session = Depends(get_db),
+    company_id: int     = Depends(get_company_id),
+):
+    batches = (
+        db.query(LandedCostBatch)
+        .filter(LandedCostBatch.company_id == company_id)
+        .order_by(LandedCostBatch.created_at.desc())
+        .all()
+    )
+    return [_fmt_batch(b, db) for b in batches]
+
+
+@router.post("/purchases", status_code=201)
+def create_purchase(
+    body:       PurchaseBatchIn,
+    db:         Session = Depends(get_db),
+    company_id: int     = Depends(get_company_id),
+):
+    if not body.lines:
+        raise HTTPException(status_code=400, detail="A purchase must have at least one product line.")
+    for line in body.lines:
+        if not db.query(SKU).filter(SKU.id == line.bulk_sku_id).first():
+            raise HTTPException(status_code=404, detail=f"SKU {line.bulk_sku_id} not found")
+
+    batch = LandedCostBatch(
+        company_id      = company_id,
+        batch_ref       = body.batch_ref,
+        supplier        = body.supplier,
+        currency        = body.currency,
+        shared_freight  = body.shared_freight,
+        shared_duty     = body.shared_duty,
+        shared_overhead = body.shared_overhead,
+        shared_other    = body.shared_other,
+        notes           = body.notes,
+    )
+    db.add(batch)
+    db.flush()   # get batch.id
+
+    _allocate_and_save_lines(db, batch, body.lines, company_id)
+    db.commit()
+    db.refresh(batch)
+    return _fmt_batch(batch, db)
+
+
+@router.get("/purchases/{batch_id}")
+def get_purchase(
+    batch_id:   int,
+    db:         Session = Depends(get_db),
+    company_id: int     = Depends(get_company_id),
+):
+    batch = db.query(LandedCostBatch).filter(
+        LandedCostBatch.id == batch_id,
+        LandedCostBatch.company_id == company_id,
+    ).first()
+    if not batch:
+        raise HTTPException(status_code=404, detail="Purchase not found")
+    return _fmt_batch(batch, db)
+
+
+@router.put("/purchases/{batch_id}")
+def update_purchase(
+    batch_id:   int,
+    body:       PurchaseBatchIn,
+    db:         Session = Depends(get_db),
+    company_id: int     = Depends(get_company_id),
+):
+    batch = db.query(LandedCostBatch).filter(
+        LandedCostBatch.id == batch_id,
+        LandedCostBatch.company_id == company_id,
+    ).first()
+    if not batch:
+        raise HTTPException(status_code=404, detail="Purchase not found")
+    if not body.lines:
+        raise HTTPException(status_code=400, detail="A purchase must have at least one product line.")
+
+    # Update header
+    batch.batch_ref       = body.batch_ref
+    batch.supplier        = body.supplier
+    batch.currency        = body.currency
+    batch.shared_freight  = body.shared_freight
+    batch.shared_duty     = body.shared_duty
+    batch.shared_overhead = body.shared_overhead
+    batch.shared_other    = body.shared_other
+    batch.notes           = body.notes
+
+    # Delete old lines and recreate
+    db.query(LandedCost).filter(LandedCost.purchase_batch_id == batch_id).delete()
+    db.flush()
+
+    _allocate_and_save_lines(db, batch, body.lines, company_id)
+    db.commit()
+    db.refresh(batch)
+    return _fmt_batch(batch, db)
+
+
+@router.delete("/purchases/{batch_id}", status_code=204)
+def delete_purchase(
+    batch_id:   int,
+    db:         Session = Depends(get_db),
+    company_id: int     = Depends(get_company_id),
+):
+    batch = db.query(LandedCostBatch).filter(
+        LandedCostBatch.id == batch_id,
+        LandedCostBatch.company_id == company_id,
+    ).first()
+    if not batch:
+        raise HTTPException(status_code=404, detail="Purchase not found")
+    # Delete linked landed-cost lines first
+    db.query(LandedCost).filter(LandedCost.purchase_batch_id == batch_id).delete()
+    db.delete(batch)
+    db.commit()
+    return None
+
+
+# ── Add Bulk Material to Packing Run ─────────────────────────────
+
+@router.post("/runs/{run_id}/bulk", status_code=201)
+def add_bulk_to_run(
+    run_id:     int,
+    body:       BulkAddIn,
+    db:         Session = Depends(get_db),
+    company_id: int     = Depends(get_company_id),
+):
+    """Add an extra bulk SKU entry to an open packing run."""
+    run = db.query(PackingRun).filter(
+        PackingRun.id == run_id,
+        PackingRun.company_id == company_id,
+    ).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if run.status == "closed":
+        raise HTTPException(status_code=400, detail="Run is already closed")
+    if not db.query(SKU).filter(SKU.id == body.bulk_sku_id).first():
+        raise HTTPException(status_code=404, detail="Bulk SKU not found")
+
+    # Upsert: if this SKU already exists in this run, update qty_start
+    existing = db.query(PackingRunBulk).filter(
+        PackingRunBulk.run_id     == run_id,
+        PackingRunBulk.bulk_sku_id == body.bulk_sku_id,
+    ).first()
+    if existing:
+        existing.qty_start = body.qty_start
+        db.commit()
+    else:
+        bulk = PackingRunBulk(
+            run_id      = run_id,
+            bulk_sku_id = body.bulk_sku_id,
+            qty_start   = body.qty_start,
+        )
+        db.add(bulk)
+        db.commit()
+
+    return _fmt_run(run, db)
+
+
+@router.delete("/runs/{run_id}/bulk/{bulk_sku_id}", status_code=204)
+def remove_bulk_from_run(
+    run_id:      int,
+    bulk_sku_id: int,
+    db:          Session = Depends(get_db),
+    company_id:  int     = Depends(get_company_id),
+):
+    """Remove a bulk SKU entry from an open packing run."""
+    run = db.query(PackingRun).filter(
+        PackingRun.id == run_id,
+        PackingRun.company_id == company_id,
+    ).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if run.status == "closed":
+        raise HTTPException(status_code=400, detail="Run is already closed")
+
+    # Must keep at least one bulk entry
+    count = db.query(PackingRunBulk).filter(PackingRunBulk.run_id == run_id).count()
+    if count <= 1:
+        raise HTTPException(status_code=400, detail="Cannot remove the only bulk material entry.")
+
+    bulk = db.query(PackingRunBulk).filter(
+        PackingRunBulk.run_id     == run_id,
+        PackingRunBulk.bulk_sku_id == bulk_sku_id,
+    ).first()
+    if not bulk:
+        raise HTTPException(status_code=404, detail="Bulk entry not found")
+    db.delete(bulk)
     db.commit()
     return None
 
