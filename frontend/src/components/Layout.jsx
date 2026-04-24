@@ -14,56 +14,71 @@ import {
 
 const navGroups = (t) => [
   {
-    label: 'Operations',
+    label: 'Warehouse',
     items: [
-      { to: '/app',            icon: LayoutDashboard, label: t('dashboard') },
-      { to: '/inventory',      icon: Warehouse,       label: t('inventory') },
-      { to: '/receiving',      icon: Truck,           label: t('receiving') },
-      { to: '/dispatch',       icon: SendHorizonal,   label: 'Dispatch' },
-      { to: '/dispatch-board', icon: LayoutGrid,      label: 'Dispatch Board' },
-      { to: '/drivers',        icon: UserCircle2,     label: 'Drivers' },
-      { to: '/quotes',         icon: FileText,        label: 'Quotations' },
-      { to: '/orders',         icon: ShoppingCart,    label: t('orders') },
-      { to: '/transfers',      icon: ArrowLeftRight,  label: t('transfers') },
-      { to: '/picking',          icon: Smartphone,      label: 'Mobile Picking' },
-      { to: '/order-check',      icon: ScanLine,        label: 'Order Check' },
-      { to: '/repacking',        icon: Factory,         label: 'Repacking' },
-      { to: '/warehouse-tasks',  icon: CheckSquare,     label: 'Warehouse Tasks' },
-      { to: '/traceability',     icon: GitBranch,       label: 'Traceability' },
-      { to: '/supplier-asn',     icon: Truck,           label: 'Supplier ASN' },
+      { to: '/app',          icon: LayoutDashboard, label: t('dashboard') },
+      { to: '/inventory',    icon: Warehouse,       label: t('inventory') },
+      { to: '/receiving',    icon: Truck,           label: t('receiving') },
+      { to: '/transfers',    icon: ArrowLeftRight,  label: t('transfers') },
+      { to: '/bin-locations',icon: MapPin,          label: 'Bin Locations' },
+      { to: '/stock-take',   icon: ClipboardList,   label: 'Stock Take' },
     ],
   },
   {
-    label: 'Planning',
+    label: 'Fulfilment',
     items: [
-      { to: '/forecasting',     icon: TrendingUp,    label: t('forecasting') },
-      { to: '/purchase-orders', icon: ShoppingBag,   label: 'Purchase Orders' },
-      { to: '/stock-take',      icon: ClipboardList, label: 'Stock Take' },
+      { to: '/quotes',         icon: FileText,      label: 'Quotations' },
+      { to: '/orders',         icon: ShoppingCart,  label: t('orders') },
+      { to: '/dispatch',       icon: SendHorizonal, label: 'Dispatch' },
+      { to: '/dispatch-board', icon: LayoutGrid,    label: 'Dispatch Board' },
+      { to: '/picking',        icon: Smartphone,    label: 'Mobile Picking' },
+      { to: '/returns',        icon: RotateCcw,     label: 'Returns' },
     ],
   },
   {
-    label: 'Management',
+    label: 'Production',
     items: [
-      { to: '/customers',     icon: Store,     label: 'Customers' },
-      { to: '/returns',       icon: RotateCcw, label: 'Returns' },
-      { to: '/credit-notes',  icon: FileX,     label: 'Credit Notes' },
-      { to: '/invoices',      icon: Receipt,   label: 'Invoices' },
-      { to: '/vendor-bills',  icon: DollarSign, label: 'Vendor Bills' },
-      { to: '/finance',       icon: BarChart2,  label: 'Finance' },
-      { to: '/balance-sheet', icon: Scale,      label: 'Balance Sheet' },
-      { to: '/price-lists',   icon: Tags,      label: 'Price Lists' },
-      { to: '/skus',          icon: Package,   label: t('skuMaster') },
-      { to: '/vendors',       icon: Users,     label: t('vendors') },
-      { to: '/bin-locations',        icon: MapPin,     label: 'Bin Locations' },
-      { to: '/expiry-alerts',        icon: AlertTriangle, label: 'Expiry Alerts' },
-      { to: '/reports',              icon: FileText,   label: 'Reports' },
-      { to: '/kpi-scorecard',        icon: BarChart2,  label: 'KPI Scorecard' },
+      { to: '/repacking',       icon: Factory,     label: 'Repacking' },
+      { to: '/order-check',     icon: ScanLine,    label: 'Order Check' },
+      { to: '/warehouse-tasks', icon: CheckSquare, label: 'Warehouse Tasks' },
+      { to: '/traceability',    icon: GitBranch,   label: 'Traceability' },
+    ],
+  },
+  {
+    label: 'Procurement',
+    items: [
+      { to: '/forecasting',     icon: TrendingUp,  label: t('forecasting') },
+      { to: '/purchase-orders', icon: ShoppingBag, label: 'Purchase Orders' },
+      { to: '/supplier-asn',    icon: Archive,     label: 'Supplier ASN' },
+      { to: '/vendors',         icon: Users,       label: t('vendors') },
+    ],
+  },
+  {
+    label: 'Finance',
+    items: [
+      { to: '/customers',            icon: Store,      label: 'Customers' },
+      { to: '/invoices',             icon: Receipt,    label: 'Invoices' },
+      { to: '/credit-notes',         icon: FileX,      label: 'Credit Notes' },
+      { to: '/vendor-bills',         icon: DollarSign, label: 'Vendor Bills' },
+      { to: '/finance',              icon: BarChart2,  label: 'Finance' },
+      { to: '/balance-sheet',        icon: Scale,      label: 'Balance Sheet' },
       { to: '/customer-statements',  icon: FileText,   label: 'Statements' },
+    ],
+  },
+  {
+    label: 'Reporting',
+    items: [
+      { to: '/reports',       icon: FileText,      label: 'Reports' },
+      { to: '/kpi-scorecard', icon: Activity,      label: 'KPI Scorecard' },
+      { to: '/expiry-alerts', icon: AlertTriangle, label: 'Expiry Alerts' },
+      { to: '/price-lists',   icon: Tags,          label: 'Price Lists' },
     ],
   },
   {
     label: 'Admin',
     items: [
+      { to: '/skus',        icon: Package,   label: t('skuMaster') },
+      { to: '/drivers',     icon: UserCircle2, label: 'Drivers' },
       { to: '/users',       icon: Shield,    label: 'Users' },
       { to: '/audit-log',   icon: Activity,  label: 'Audit Log' },
       { to: '/spreadsheet', icon: Table2,    label: 'Spreadsheets' },
@@ -297,12 +312,37 @@ function TopBar({ user, logout }) {
 
 // ── Sidebar nav content ───────────────────────────────────────
 function SidebarContent({ t, lang, setLang, onNavClick, user, logout }) {
-  const allowed = user ? ROLE_NAV[user.role] : null
+  const location = useLocation()
+  const allowed  = user ? ROLE_NAV[user.role] : null
 
   const filteredGroups = navGroups(t).map(group => ({
     ...group,
     items: group.items.filter(item => !allowed || allowed.includes(item.to)),
   })).filter(group => group.items.length > 0)
+
+  // Initialise: expand whichever group contains the current active route; collapse the rest
+  const [expanded, setExpanded] = useState(() => {
+    const map = {}
+    filteredGroups.forEach(g => {
+      map[g.label] = g.items.some(i =>
+        location.pathname === i.to || location.pathname.startsWith(i.to + '/')
+      )
+    })
+    return map
+  })
+
+  // When the route changes, always make sure the active group is open
+  useEffect(() => {
+    filteredGroups.forEach(g => {
+      if (g.items.some(i => location.pathname === i.to || location.pathname.startsWith(i.to + '/'))) {
+        setExpanded(prev => ({ ...prev, [g.label]: true }))
+      }
+    })
+  // filteredGroups is stable per render so this is safe to exclude
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname])
+
+  const toggle = (label) => setExpanded(prev => ({ ...prev, [label]: !prev[label] }))
 
   const initials = user
     ? (user.full_name || user.username || '?').split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
@@ -310,34 +350,56 @@ function SidebarContent({ t, lang, setLang, onNavClick, user, logout }) {
 
   return (
     <>
-      <nav className="flex-1 p-3 overflow-y-auto space-y-4">
-        {filteredGroups.map((group) => (
-          <div key={group.label}>
-            <p className="px-3 mb-1.5 text-[10px] font-bold uppercase tracking-widest text-gray-500">
-              {group.label}
-            </p>
-            <div className="space-y-0.5">
-              {group.items.map(({ to, icon: Icon, label }) => (
-                <NavLink
-                  key={to}
-                  to={to}
-                  end={to === '/app'}
-                  onClick={onNavClick}
-                  className={({ isActive }) =>
-                    `flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                      isActive
-                        ? 'bg-blue-600 text-white shadow-sm'
-                        : 'text-gray-400 hover:bg-gray-800 hover:text-white'
-                    }`
-                  }
-                >
-                  <Icon size={16} />
-                  {label}
-                </NavLink>
-              ))}
+      <nav className="flex-1 p-2 overflow-y-auto">
+        {filteredGroups.map((group) => {
+          const isOpen = !!expanded[group.label]
+          const hasActive = group.items.some(i =>
+            location.pathname === i.to || location.pathname.startsWith(i.to + '/')
+          )
+          return (
+            <div key={group.label} className="mb-0.5">
+              {/* ── Group header (toggle button) ── */}
+              <button
+                onClick={() => toggle(group.label)}
+                className={`w-full flex items-center justify-between px-3 py-1.5 rounded-lg transition-colors group ${
+                  hasActive
+                    ? 'text-blue-400'
+                    : 'text-gray-500 hover:text-gray-300'
+                } hover:bg-gray-800`}
+              >
+                <span className="text-[10px] font-bold uppercase tracking-widest">{group.label}</span>
+                <ChevronDown
+                  size={11}
+                  className={`flex-shrink-0 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
+                />
+              </button>
+
+              {/* ── Nav items (visible when open) ── */}
+              {isOpen && (
+                <div className="mt-0.5 mb-2 space-y-0.5">
+                  {group.items.map(({ to, icon: Icon, label }) => (
+                    <NavLink
+                      key={to}
+                      to={to}
+                      end={to === '/app'}
+                      onClick={onNavClick}
+                      className={({ isActive }) =>
+                        `flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                          isActive
+                            ? 'bg-blue-600 text-white shadow-sm'
+                            : 'text-gray-400 hover:bg-gray-800 hover:text-white'
+                        }`
+                      }
+                    >
+                      <Icon size={16} />
+                      {label}
+                    </NavLink>
+                  ))}
+                </div>
+              )}
             </div>
-          </div>
-        ))}
+          )
+        })}
       </nav>
 
       {/* Language toggle */}
