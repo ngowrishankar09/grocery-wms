@@ -1059,6 +1059,7 @@ class PackingRun(Base):
     variance_kg    = Column(Float, nullable=True)
     variance_pct   = Column(Float, nullable=True)
     flag_high_variance = Column(Boolean, default=False)
+    landed_cost_id = Column(Integer, ForeignKey("landed_costs.id", ondelete='SET NULL'), nullable=True)
 
 class PackingRunOutput(Base):
     __tablename__ = "packing_run_outputs"

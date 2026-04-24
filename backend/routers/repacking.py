@@ -7,11 +7,11 @@ potential theft when variance exceeds BOM-defined tolerance.
 Prefix: /repacking  Tags: ["Repacking"]
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, date
 
 import sys, os
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
@@ -33,11 +33,12 @@ class BOMIn(BaseModel):
     notes:             Optional[str] = None
 
 class RunIn(BaseModel):
-    run_ref:      Optional[str] = None
-    bulk_sku_id:  int
-    qty_start:    float
-    started_by:   Optional[str] = None
-    notes:        Optional[str] = None
+    run_ref:        Optional[str] = None
+    bulk_sku_id:    int
+    qty_start:      float
+    started_by:     Optional[str] = None
+    notes:          Optional[str] = None
+    landed_cost_id: Optional[int] = None   # link a specific landed-cost batch
 
 class OutputIn(BaseModel):
     sku_id:     int
@@ -85,10 +86,17 @@ def _sku_code(db: Session, sku_id: int) -> str:
 def _fmt_run(run: PackingRun, db: Session) -> dict:
     outputs = db.query(PackingRunOutput).filter(PackingRunOutput.run_id == run.id).all()
     bulk_entries = db.query(PackingRunBulk).filter(PackingRunBulk.run_id == run.id).all()
+    # Resolve linked landed-cost batch label
+    linked_lc = None
+    if getattr(run, 'landed_cost_id', None):
+        linked_lc = db.query(LandedCost).filter(LandedCost.id == run.landed_cost_id).first()
     return {
         "id":                run.id,
         "run_ref":           run.run_ref,
         "status":            run.status,
+        "landed_cost_id":    getattr(run, 'landed_cost_id', None),
+        "linked_batch_ref":  linked_lc.batch_ref if linked_lc else None,
+        "linked_cost_per_kg": linked_lc.cost_per_kg if linked_lc else None,
         "started_by":        run.started_by,
         "notes":             run.notes,
         "created_at":        run.created_at.isoformat() if run.created_at else None,
@@ -209,6 +217,47 @@ def create_bom(
     }
 
 
+@router.put("/bom/{bom_id}")
+def update_bom(
+    bom_id:     int,
+    body:       BOMIn,
+    db:         Session = Depends(get_db),
+    company_id: int     = Depends(get_company_id),
+):
+    bom = db.query(BillOfMaterial).filter(
+        BillOfMaterial.id == bom_id,
+        BillOfMaterial.company_id == company_id,
+    ).first()
+    if not bom:
+        raise HTTPException(status_code=404, detail="BOM not found")
+
+    for sku_id in [body.output_sku_id, body.input_sku_id]:
+        if not db.query(SKU).filter(SKU.id == sku_id).first():
+            raise HTTPException(status_code=404, detail=f"SKU {sku_id} not found")
+
+    bom.output_sku_id     = body.output_sku_id
+    bom.input_sku_id      = body.input_sku_id
+    bom.qty_per_unit      = body.qty_per_unit
+    bom.unit              = body.unit
+    bom.waste_pct_allowed = body.waste_pct_allowed
+    bom.notes             = body.notes
+    db.commit()
+    db.refresh(bom)
+    return {
+        "id":                bom.id,
+        "output_sku_id":     bom.output_sku_id,
+        "output_sku_name":   _sku_name(db, bom.output_sku_id),
+        "output_sku_code":   _sku_code(db, bom.output_sku_id),
+        "input_sku_id":      bom.input_sku_id,
+        "input_sku_name":    _sku_name(db, bom.input_sku_id),
+        "input_sku_code":    _sku_code(db, bom.input_sku_id),
+        "qty_per_unit":      bom.qty_per_unit,
+        "unit":              bom.unit,
+        "waste_pct_allowed": bom.waste_pct_allowed,
+        "notes":             bom.notes,
+    }
+
+
 @router.delete("/bom/{bom_id}", status_code=204)
 def delete_bom(
     bom_id:     int,
@@ -272,12 +321,21 @@ def create_run(
     if not db.query(SKU).filter(SKU.id == body.bulk_sku_id).first():
         raise HTTPException(status_code=404, detail="Bulk SKU not found")
 
+    # Validate the linked landed cost if provided
+    if body.landed_cost_id is not None:
+        if not db.query(LandedCost).filter(
+            LandedCost.id == body.landed_cost_id,
+            LandedCost.company_id == company_id,
+        ).first():
+            raise HTTPException(status_code=404, detail="Landed cost not found")
+
     run = PackingRun(
-        company_id = company_id,
-        run_ref    = body.run_ref,
-        status     = "open",
-        started_by = body.started_by,
-        notes      = body.notes,
+        company_id     = company_id,
+        run_ref        = body.run_ref,
+        status         = "open",
+        started_by     = body.started_by,
+        notes          = body.notes,
+        landed_cost_id = body.landed_cost_id,
     )
     db.add(run)
     db.flush()
@@ -475,12 +533,17 @@ def close_run(
 def get_summary(
     db:         Session = Depends(get_db),
     company_id: int     = Depends(get_company_id),
+    from_date:  Optional[date] = Query(None, description="Filter runs closed on or after this date"),
+    to_date:    Optional[date] = Query(None, description="Filter runs closed on or before this date"),
 ):
-    all_runs = (
-        db.query(PackingRun)
-        .filter(PackingRun.company_id == company_id)
-        .all()
-    )
+    q = db.query(PackingRun).filter(PackingRun.company_id == company_id)
+    # Date filter applies to created_at so open runs are also counted correctly
+    if from_date:
+        q = q.filter(PackingRun.created_at >= datetime.combine(from_date, datetime.min.time()))
+    if to_date:
+        from datetime import timedelta
+        q = q.filter(PackingRun.created_at < datetime.combine(to_date + timedelta(days=1), datetime.min.time()))
+    all_runs = q.all()
     closed_runs = [r for r in all_runs if r.status == "closed"]
     flagged_runs = [r for r in closed_runs if r.flag_high_variance]
 
@@ -794,9 +857,15 @@ def get_cost_summary(
     # Determine the bulk SKU used in this run (first bulk entry)
     bulk_sku_id = bulk_entries[0].bulk_sku_id if bulk_entries else None
 
-    # Find most recent LandedCost for this bulk SKU
+    # Prefer the run's explicitly linked LandedCost; fall back to most-recent for bulk SKU
     landed_cost = None
-    if bulk_sku_id is not None:
+    run_lc_id = getattr(run, 'landed_cost_id', None)
+    if run_lc_id is not None:
+        landed_cost = db.query(LandedCost).filter(
+            LandedCost.id == run_lc_id,
+            LandedCost.company_id == company_id,
+        ).first()
+    if landed_cost is None and bulk_sku_id is not None:
         landed_cost = (
             db.query(LandedCost)
             .filter(

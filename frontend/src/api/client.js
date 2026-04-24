@@ -468,6 +468,7 @@ export const repackingAPI = {
   // BOM
   listBOM:    ()         => api.get('/repacking/bom'),
   createBOM:  (data)     => api.post('/repacking/bom', data),
+  updateBOM:  (id, data) => api.put(`/repacking/bom/${id}`, data),
   deleteBOM:  (id)       => api.delete(`/repacking/bom/${id}`),
   // Runs
   listRuns:   ()         => api.get('/repacking/runs'),
@@ -476,7 +477,7 @@ export const repackingAPI = {
   addOutput:  (id, data) => api.post(`/repacking/runs/${id}/output`, data),
   removeOutput: (id, skuId) => api.delete(`/repacking/runs/${id}/output/${skuId}`),
   closeRun:   (id, data) => api.post(`/repacking/runs/${id}/close`, data),
-  summary:    ()         => api.get('/repacking/summary'),
+  summary:    (params)   => api.get('/repacking/summary', { params }),
   // Landed costs
   listLandedCosts:  ()         => api.get('/repacking/landed-costs'),
   createLandedCost: (data)     => api.post('/repacking/landed-costs', data),

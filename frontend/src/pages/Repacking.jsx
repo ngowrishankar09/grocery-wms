@@ -3,6 +3,7 @@ import { repackingAPI, skuAPI } from '../api/client'
 import {
   Loader2, Plus, Trash2, Package, ChevronLeft, AlertTriangle,
   CheckCircle2, X, Factory, Scale, DollarSign, Edit2, Save,
+  Info, ChevronDown, ChevronUp,
 } from 'lucide-react'
 
 // ── Formatting helpers ────────────────────────────────────────
@@ -48,18 +49,60 @@ function StatusBadge({ status }) {
     : <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-gray-200 text-gray-600">Closed</span>
 }
 
+// ── Setup Guide ───────────────────────────────────────────────
+function SetupGuide() {
+  const [open, setOpen] = useState(true)
+  const steps = [
+    { n: 1, title: 'Create SKUs', desc: 'Go to the SKUs page and create a bulk material SKU (e.g. "Coriander Powder Bulk") and a retail output SKU (e.g. "Coriander Powder 200g Case").', tab: null },
+    { n: 2, title: 'Add a Bill of Materials', desc: 'In the BOM tab, link your bulk SKU → retail SKU and enter how many kg of bulk are consumed per case packed (e.g. 4.0 kg/case for 20 × 200g sachets).', tab: 0 },
+    { n: 3, title: 'Record a Landed Cost', desc: 'In the Landed Costs tab, enter the full cost of your bulk shipment — material, freight, duty, packaging, labour, overhead. The system computes cost per kg automatically.', tab: 1 },
+    { n: 4, title: 'Start a Packing Run', desc: 'In the Packing Runs tab, click "New Run". Select the bulk SKU, weigh it and enter the starting weight. Optionally link the landed cost batch for accurate costing.', tab: 2 },
+    { n: 5, title: 'Pack & Record Cases', desc: 'Add each product you packed and how many cases. The blue panel shows the expected weight remaining on the scale at all times.', tab: 2 },
+    { n: 6, title: 'Weigh & Close', desc: 'When done, weigh the leftover bulk and close the run. The system calculates variance and flags anything above your allowed waste %.', tab: 2 },
+  ]
+  return (
+    <div className="mb-6 border border-blue-200 rounded-xl overflow-hidden">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between px-4 py-3 bg-blue-50 text-blue-800 font-semibold text-sm hover:bg-blue-100 transition-colors"
+      >
+        <span className="flex items-center gap-2"><Info size={15} /> Getting Started — How to use Repacking</span>
+        {open ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+      </button>
+      {open && (
+        <div className="p-4 bg-white">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {steps.map(s => (
+              <div key={s.n} className="flex gap-3 p-3 rounded-lg bg-gray-50 border border-gray-100">
+                <div className="flex-shrink-0 w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-bold flex items-center justify-center mt-0.5">{s.n}</div>
+                <div>
+                  <p className="font-semibold text-gray-800 text-sm">{s.title}</p>
+                  <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">{s.desc}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Tab 1: Bills of Materials ─────────────────────────────────
 function BOMTab({ skus }) {
-  const [boms, setBoms]       = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError]     = useState(null)
+  const [boms, setBoms]         = useState([])
+  const [loading, setLoading]   = useState(true)
+  const [error, setError]       = useState(null)
   const [showForm, setShowForm] = useState(false)
-  const [form, setForm]       = useState({
+  const [editBomId, setEditBomId] = useState(null)
+  const [form, setForm]         = useState({
     output_sku_id: '', input_sku_id: '', qty_per_unit: '', unit: 'kg',
     waste_pct_allowed: 2, notes: '',
   })
-  const [saving, setSaving]   = useState(false)
+  const [saving, setSaving]     = useState(false)
   const [formError, setFormError] = useState(null)
+
+  const emptyForm = { output_sku_id: '', input_sku_id: '', qty_per_unit: '', unit: 'kg', waste_pct_allowed: 2, notes: '' }
 
   const load = useCallback(async () => {
     setLoading(true); setError(null)
@@ -73,7 +116,29 @@ function BOMTab({ skus }) {
 
   useEffect(() => { load() }, [load])
 
-  const handleCreate = async (e) => {
+  const openNew = () => {
+    setEditBomId(null)
+    setForm(emptyForm)
+    setFormError(null)
+    setShowForm(true)
+  }
+
+  const openEdit = (bom) => {
+    setEditBomId(bom.id)
+    setForm({
+      output_sku_id:     String(bom.output_sku_id),
+      input_sku_id:      String(bom.input_sku_id),
+      qty_per_unit:      String(bom.qty_per_unit),
+      unit:              bom.unit || 'kg',
+      waste_pct_allowed: bom.waste_pct_allowed ?? 2,
+      notes:             bom.notes || '',
+    })
+    setFormError(null)
+    setShowForm(true)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  const handleSubmit = async (e) => {
     e.preventDefault(); setFormError(null)
     if (!form.output_sku_id || !form.input_sku_id || !form.qty_per_unit) {
       setFormError('Please fill all required fields.'); return
@@ -81,21 +146,27 @@ function BOMTab({ skus }) {
     if (form.output_sku_id === form.input_sku_id) {
       setFormError('Output and input SKU must be different.'); return
     }
+    const payload = {
+      output_sku_id:     parseInt(form.output_sku_id),
+      input_sku_id:      parseInt(form.input_sku_id),
+      qty_per_unit:      parseFloat(form.qty_per_unit),
+      unit:              form.unit,
+      waste_pct_allowed: parseFloat(form.waste_pct_allowed),
+      notes:             form.notes || null,
+    }
     setSaving(true)
     try {
-      await repackingAPI.createBOM({
-        output_sku_id:     parseInt(form.output_sku_id),
-        input_sku_id:      parseInt(form.input_sku_id),
-        qty_per_unit:      parseFloat(form.qty_per_unit),
-        unit:              form.unit,
-        waste_pct_allowed: parseFloat(form.waste_pct_allowed),
-        notes:             form.notes || null,
-      })
+      if (editBomId) {
+        await repackingAPI.updateBOM(editBomId, payload)
+      } else {
+        await repackingAPI.createBOM(payload)
+      }
       setShowForm(false)
-      setForm({ output_sku_id: '', input_sku_id: '', qty_per_unit: '', unit: 'kg', waste_pct_allowed: 2, notes: '' })
+      setEditBomId(null)
+      setForm(emptyForm)
       load()
     } catch (e) {
-      setFormError(e.response?.data?.detail || 'Failed to create BOM')
+      setFormError(e.response?.data?.detail || 'Failed to save BOM')
     } finally { setSaving(false) }
   }
 
@@ -114,15 +185,17 @@ function BOMTab({ skus }) {
             Define how much bulk material is consumed per retail unit packed.
           </p>
         </div>
-        <button onClick={() => { setShowForm(s => !s); setFormError(null) }} className="btn-primary flex items-center gap-1.5">
+        <button onClick={openNew} className="btn-primary flex items-center gap-1.5">
           <Plus size={15} /> Add BOM
         </button>
       </div>
 
       {showForm && (
         <div className="card mb-4 border border-blue-200 bg-blue-50">
-          <h3 className="font-semibold text-gray-800 mb-3">New Bill of Material</h3>
-          <form onSubmit={handleCreate} className="space-y-3">
+          <h3 className="font-semibold text-gray-800 mb-3">
+            {editBomId ? '✏️ Edit Bill of Material' : 'New Bill of Material'}
+          </h3>
+          <form onSubmit={handleSubmit} className="space-y-3">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">Output SKU (retail/finished) <span className="text-red-500">*</span></label>
@@ -144,11 +217,12 @@ function BOMTab({ skus }) {
                   <input type="number" step="0.001" min="0.001" className="input flex-1" placeholder="e.g. 4.0" value={form.qty_per_unit} onChange={e => setForm(f => ({ ...f, qty_per_unit: e.target.value }))} required />
                   <input type="text" className="input w-20" placeholder="kg" value={form.unit} onChange={e => setForm(f => ({ ...f, unit: e.target.value }))} />
                 </div>
-                <p className="text-xs text-gray-400 mt-1">How much bulk is consumed per 1 case.</p>
+                <p className="text-xs text-gray-400 mt-1">Example: 20 × 200g sachets per case = 4.0 kg consumed per case packed.</p>
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Allowed waste % (threshold)</label>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Allowed waste % (flag threshold)</label>
                 <input type="number" step="0.1" min="0" max="100" className="input w-full" value={form.waste_pct_allowed} onChange={e => setForm(f => ({ ...f, waste_pct_allowed: e.target.value }))} />
+                <p className="text-xs text-gray-400 mt-1">Variance above this % will be flagged red.</p>
               </div>
             </div>
             <div>
@@ -158,9 +232,10 @@ function BOMTab({ skus }) {
             {formError && <p className="text-sm text-red-600 flex items-center gap-1"><AlertTriangle size={14} /> {formError}</p>}
             <div className="flex gap-2">
               <button type="submit" className="btn-primary flex items-center gap-1.5" disabled={saving}>
-                {saving && <Loader2 size={14} className="animate-spin" />} Save BOM
+                {saving && <Loader2 size={14} className="animate-spin" />}
+                {editBomId ? 'Update BOM' : 'Save BOM'}
               </button>
-              <button type="button" className="btn-secondary" onClick={() => setShowForm(false)}>Cancel</button>
+              <button type="button" className="btn-secondary" onClick={() => { setShowForm(false); setEditBomId(null) }}>Cancel</button>
             </div>
           </form>
         </div>
@@ -174,7 +249,8 @@ function BOMTab({ skus }) {
         <div className="card text-center py-12 text-gray-400">
           <Package size={36} className="mx-auto mb-3 opacity-30" />
           <p className="font-medium">No bills of materials yet.</p>
-          <p className="text-sm mt-1">Add a BOM to define how much bulk is needed per retail pack.</p>
+          <p className="text-sm mt-1">Add a BOM to define how much bulk is consumed per retail case.</p>
+          <button onClick={openNew} className="btn-primary mt-4 mx-auto">+ Add First BOM</button>
         </div>
       ) : (
         <div className="card p-0 overflow-hidden">
@@ -191,14 +267,17 @@ function BOMTab({ skus }) {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {boms.map(b => (
-                <tr key={b.id} className="hover:bg-gray-50">
+                <tr key={b.id} className={`hover:bg-gray-50 ${editBomId === b.id ? 'bg-blue-50' : ''}`}>
                   <td className="px-4 py-3"><div className="font-medium text-gray-800">{b.output_sku_name}</div><div className="text-xs text-gray-400">{b.output_sku_code}</div></td>
                   <td className="px-4 py-3"><div className="font-medium text-gray-800">{b.input_sku_name}</div><div className="text-xs text-gray-400">{b.input_sku_code}</div></td>
                   <td className="px-4 py-3 text-right font-mono">{b.qty_per_unit} {b.unit}</td>
                   <td className="px-4 py-3 text-right">{b.waste_pct_allowed}%</td>
-                  <td className="px-4 py-3 text-gray-500">{b.notes || '—'}</td>
+                  <td className="px-4 py-3 text-gray-500 text-xs">{b.notes || '—'}</td>
                   <td className="px-4 py-3 text-right">
-                    <button onClick={() => handleDelete(b.id)} className="p-1.5 text-gray-400 hover:text-red-500 rounded transition-colors" title="Delete BOM"><Trash2 size={14} /></button>
+                    <div className="flex items-center justify-end gap-1">
+                      <button onClick={() => openEdit(b)} className="p-1.5 text-gray-400 hover:text-blue-500 rounded transition-colors" title="Edit BOM"><Edit2 size={13} /></button>
+                      <button onClick={() => handleDelete(b.id)} className="p-1.5 text-gray-400 hover:text-red-500 rounded transition-colors" title="Delete BOM"><Trash2 size={14} /></button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -233,9 +312,9 @@ function calcLCTotal(form) {
 }
 
 function LandedCostsTab({ skus }) {
-  const [records, setRecords] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError]     = useState(null)
+  const [records, setRecords]     = useState([])
+  const [loading, setLoading]     = useState(true)
+  const [error, setError]         = useState(null)
   const [showForm, setShowForm]   = useState(false)
   const [editId, setEditId]       = useState(null)
   const [form, setForm]           = useState(emptyLCForm())
@@ -255,18 +334,15 @@ function LandedCostsTab({ skus }) {
   useEffect(() => { load() }, [load])
 
   const openNew = () => {
-    setEditId(null)
-    setForm(emptyLCForm())
-    setFormError(null)
-    setShowForm(true)
+    setEditId(null); setForm(emptyLCForm()); setFormError(null); setShowForm(true)
   }
 
   const openEdit = (lc) => {
     setEditId(lc.id)
     setForm({
-      bulk_sku_id: String(lc.bulk_sku_id),
-      batch_ref:   lc.batch_ref || '',
-      qty_kg:      String(lc.qty_kg),
+      bulk_sku_id:        String(lc.bulk_sku_id),
+      batch_ref:          lc.batch_ref || '',
+      qty_kg:             String(lc.qty_kg),
       cost_material:      String(lc.cost_material ?? 0),
       cost_freight:       String(lc.cost_freight ?? 0),
       cost_duty:          String(lc.cost_duty ?? 0),
@@ -274,11 +350,10 @@ function LandedCostsTab({ skus }) {
       cost_labor:         String(lc.cost_labor ?? 0),
       cost_overhead:      String(lc.cost_overhead ?? 0),
       cost_other:         String(lc.cost_other ?? 0),
-      currency:   lc.currency || 'USD',
-      notes:      lc.notes || '',
+      currency:           lc.currency || 'USD',
+      notes:              lc.notes || '',
     })
-    setFormError(null)
-    setShowForm(true)
+    setFormError(null); setShowForm(true)
   }
 
   const handleSubmit = async (e) => {
@@ -307,10 +382,7 @@ function LandedCostsTab({ skus }) {
       } else {
         await repackingAPI.createLandedCost(payload)
       }
-      setShowForm(false)
-      setEditId(null)
-      setForm(emptyLCForm())
-      load()
+      setShowForm(false); setEditId(null); setForm(emptyLCForm()); load()
     } catch (e) {
       setFormError(e.response?.data?.detail || 'Failed to save landed cost')
     } finally { setSaving(false) }
@@ -333,8 +405,7 @@ function LandedCostsTab({ skus }) {
         <div>
           <h2 className="text-lg font-semibold text-gray-800">Landed Costs</h2>
           <p className="text-sm text-gray-500 mt-0.5">
-            Record the full cost of each bulk sourcing batch — material, freight, duty, labour and overhead —
-            to compute an accurate cost per kg.
+            Record the full cost of each bulk sourcing batch — material, freight, duty, labour and overhead — to compute an accurate cost per kg.
           </p>
         </div>
         <button onClick={openNew} className="btn-primary flex items-center gap-1.5">
@@ -342,14 +413,12 @@ function LandedCostsTab({ skus }) {
         </button>
       </div>
 
-      {/* Form */}
       {showForm && (
         <div className="card mb-4 border border-green-200 bg-green-50">
           <h3 className="font-semibold text-gray-800 mb-3">
-            {editId ? 'Edit Landed Cost' : 'New Landed Cost'}
+            {editId ? '✏️ Edit Landed Cost' : 'New Landed Cost'}
           </h3>
           <form onSubmit={handleSubmit} className="space-y-4">
-            {/* SKU + Qty + Currency */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">Bulk SKU <span className="text-red-500">*</span></label>
@@ -367,24 +436,14 @@ function LandedCostsTab({ skus }) {
                 <input type="number" step="0.001" min="0.001" className="input w-full" placeholder="e.g. 5000" value={form.qty_kg} onChange={e => setForm(f => ({ ...f, qty_kg: e.target.value }))} required />
               </div>
             </div>
-
-            {/* Cost fields */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
               {LC_COST_FIELDS.map(({ key, label }) => (
                 <div key={key}>
                   <label className="block text-xs font-medium text-gray-700 mb-1">{label}</label>
-                  <input
-                    type="number" step="0.01" min="0"
-                    className="input w-full"
-                    placeholder="0.00"
-                    value={form[key]}
-                    onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
-                  />
+                  <input type="number" step="0.01" min="0" className="input w-full" placeholder="0.00" value={form[key]} onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))} />
                 </div>
               ))}
             </div>
-
-            {/* Running total preview */}
             <div className="bg-white border border-green-300 rounded-lg px-4 py-3 flex items-center justify-between">
               <div>
                 <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">Running Total</p>
@@ -397,8 +456,6 @@ function LandedCostsTab({ skus }) {
                 </div>
               )}
             </div>
-
-            {/* Currency + Notes */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">Currency</label>
@@ -411,7 +468,6 @@ function LandedCostsTab({ skus }) {
                 <input type="text" className="input w-full" placeholder="Optional notes…" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
               </div>
             </div>
-
             {formError && <p className="text-sm text-red-600 flex items-center gap-1"><AlertTriangle size={14} /> {formError}</p>}
             <div className="flex gap-2">
               <button type="submit" className="btn-primary flex items-center gap-1.5" disabled={saving}>
@@ -424,7 +480,6 @@ function LandedCostsTab({ skus }) {
         </div>
       )}
 
-      {/* Table */}
       {loading ? (
         <div className="flex justify-center py-12"><Loader2 className="animate-spin text-blue-500" size={28} /></div>
       ) : error ? (
@@ -434,6 +489,7 @@ function LandedCostsTab({ skus }) {
           <DollarSign size={36} className="mx-auto mb-3 opacity-30" />
           <p className="font-medium">No landed costs recorded yet.</p>
           <p className="text-sm mt-1">Add a landed cost to track the true cost per kg of each bulk batch.</p>
+          <button onClick={openNew} className="btn-primary mt-4 mx-auto">+ Add First Landed Cost</button>
         </div>
       ) : (
         <div className="card p-0 overflow-x-auto">
@@ -496,16 +552,16 @@ function LandedCostsTab({ skus }) {
 
 // ── Operational Costs card (inside Run Detail) ────────────────
 function OperationalCostsCard({ runDetail, onSaved }) {
-  const [costs, setCosts]     = useState(null)
-  const [summary, setSummary] = useState(null)
-  const [loadingCosts, setLoadingCosts] = useState(true)
+  const [costs, setCosts]         = useState(null)
+  const [summary, setSummary]     = useState(null)
+  const [loadingCosts, setLoadingCosts]     = useState(true)
   const [loadingSummary, setLoadingSummary] = useState(false)
   const [form, setForm] = useState({
     cost_packaging_mat: '', cost_labor: '', cost_overhead: '', cost_other: '', labor_hours: '', notes: '',
   })
-  const [saving, setSaving]   = useState(false)
+  const [saving, setSaving]     = useState(false)
   const [saveError, setSaveError] = useState(null)
-  const [saveOk, setSaveOk]   = useState(false)
+  const [saveOk, setSaveOk]     = useState(false)
 
   const loadCosts = useCallback(async () => {
     setLoadingCosts(true)
@@ -569,11 +625,7 @@ function OperationalCostsCard({ runDetail, onSaved }) {
   const costPerCase = totalCases > 0 ? totalPacking / totalCases : 0
 
   if (loadingCosts) {
-    return (
-      <div className="card flex justify-center py-8">
-        <Loader2 className="animate-spin text-blue-500" size={22} />
-      </div>
-    )
+    return <div className="card flex justify-center py-8"><Loader2 className="animate-spin text-blue-500" size={22} /></div>
   }
 
   return (
@@ -583,11 +635,8 @@ function OperationalCostsCard({ runDetail, onSaved }) {
         <h3 className="font-semibold text-gray-800 text-base">Operational Costs</h3>
       </div>
 
-      {/* Section A: Packing run costs form */}
       <div>
-        <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-3">
-          Section A — Packing Run Costs
-        </p>
+        <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-3">Section A — Packing Run Costs</p>
         <form onSubmit={handleSave} className="space-y-3">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {[
@@ -598,40 +647,20 @@ function OperationalCostsCard({ runDetail, onSaved }) {
             ].map(({ key, label }) => (
               <div key={key}>
                 <label className="block text-xs font-medium text-gray-700 mb-1">{label}</label>
-                <input
-                  type="number" step="0.01" min="0"
-                  className="input w-full"
-                  placeholder="0.00"
-                  value={form[key]}
-                  onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
-                />
+                <input type="number" step="0.01" min="0" className="input w-full" placeholder="0.00" value={form[key]} onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))} />
               </div>
             ))}
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">Labor Hours (optional)</label>
-              <input
-                type="number" step="0.25" min="0"
-                className="input w-full"
-                placeholder="e.g. 8.5"
-                value={form.labor_hours}
-                onChange={e => setForm(f => ({ ...f, labor_hours: e.target.value }))}
-              />
+              <input type="number" step="0.25" min="0" className="input w-full" placeholder="e.g. 8.5" value={form.labor_hours} onChange={e => setForm(f => ({ ...f, labor_hours: e.target.value }))} />
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">Notes</label>
-              <input
-                type="text"
-                className="input w-full"
-                placeholder="Optional notes…"
-                value={form.notes}
-                onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
-              />
+              <input type="text" className="input w-full" placeholder="Optional notes…" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
             </div>
           </div>
-
-          {/* Live totals */}
           <div className="bg-gray-50 rounded-lg px-4 py-3 grid grid-cols-2 gap-4 text-sm">
             <div>
               <span className="text-gray-500">Total packing cost</span>
@@ -643,10 +672,8 @@ function OperationalCostsCard({ runDetail, onSaved }) {
               <span className="text-xs text-gray-400 ml-1">({totalCases} cases)</span>
             </div>
           </div>
-
           {saveError && <p className="text-sm text-red-600 flex items-center gap-1"><AlertTriangle size={14} /> {saveError}</p>}
           {saveOk && <p className="text-sm text-green-600 flex items-center gap-1"><CheckCircle2 size={14} /> Costs saved successfully.</p>}
-
           <button type="submit" className="btn-primary flex items-center gap-1.5" disabled={saving}>
             {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
             Save Costs
@@ -654,12 +681,8 @@ function OperationalCostsCard({ runDetail, onSaved }) {
         </form>
       </div>
 
-      {/* Section B: Full cost breakdown (only when closed + landed cost exists) */}
       <div>
-        <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-3">
-          Section B — Full Cost Breakdown
-        </p>
-
+        <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-3">Section B — Full Cost Breakdown</p>
         {runDetail.status === 'open' ? (
           <div className="text-sm text-gray-500 italic bg-gray-50 rounded-lg p-3">
             Cost breakdown will be available once you close the run.
@@ -675,30 +698,23 @@ function OperationalCostsCard({ runDetail, onSaved }) {
           </div>
         ) : summary ? (
           <div className="bg-gray-900 text-gray-100 rounded-xl p-5 font-mono text-sm space-y-4">
-            {/* Header line */}
-            <div className="border-b border-gray-600 pb-2 text-gray-300 text-xs">
-              {'━'.repeat(52)}
-            </div>
-
-            {/* Bulk material cost */}
+            <div className="border-b border-gray-600 pb-2 text-gray-300 text-xs">{'━'.repeat(52)}</div>
             <div className="space-y-1">
               <div className="text-green-400 font-bold uppercase tracking-wide text-xs">
-                Bulk Material Cost {summary.landed_cost_ref ? `(Batch: "${summary.landed_cost_ref}")` : ''}
+                Bulk Material Cost {summary.landed_cost_ref ? `(Batch: "${summary.landed_cost_ref}")` : '(most recent batch)'}
               </div>
               <div className="flex justify-between text-gray-200">
                 <span>{(+summary.total_theoretical_kg).toFixed(3)} kg × ${(+summary.cost_per_kg).toFixed(4)}/kg</span>
                 <span className="font-bold text-white">{fmt$(summary.bulk_material_cost)}</span>
               </div>
             </div>
-
-            {/* Packing run costs */}
             <div className="space-y-1">
               <div className="text-blue-400 font-bold uppercase tracking-wide text-xs">Packing Run Costs</div>
               {[
                 ['Packaging materials', summary.packing_costs.cost_packaging_mat],
                 ['Labor' + (summary.packing_costs.labor_hours ? ` (${summary.packing_costs.labor_hours} hrs)` : ''), summary.packing_costs.cost_labor],
-                ['Overhead',            summary.packing_costs.cost_overhead],
-                ['Other',              summary.packing_costs.cost_other],
+                ['Overhead', summary.packing_costs.cost_overhead],
+                ['Other',    summary.packing_costs.cost_other],
               ].map(([label, val]) => (
                 <div key={label} className="flex justify-between text-gray-300">
                   <span className="pl-4">{label}</span>
@@ -710,8 +726,6 @@ function OperationalCostsCard({ runDetail, onSaved }) {
                 <span className="font-bold">{fmt$(summary.packing_costs.total)}</span>
               </div>
             </div>
-
-            {/* Per output breakdown */}
             {summary.per_output?.length > 0 && (
               <div className="space-y-2">
                 <div className="text-yellow-400 font-bold uppercase tracking-wide text-xs">Per Output Breakdown</div>
@@ -731,15 +745,13 @@ function OperationalCostsCard({ runDetail, onSaved }) {
                       <span>{fmt$(o.packing_per_case)}/case</span>
                     </div>
                     <div className="flex justify-between text-white font-bold pl-4 border-t border-gray-700 pt-0.5">
-                      <span>{'══'} Total cost per case</span>
+                      <span>══ Total cost per case</span>
                       <span>{fmt$(o.total_per_case)}</span>
                     </div>
                   </div>
                 ))}
               </div>
             )}
-
-            {/* Grand totals */}
             <div className="border-t border-gray-500 pt-3 space-y-1">
               <div className="text-gray-300 text-xs">{'━'.repeat(52)}</div>
               <div className="flex justify-between text-white font-bold text-base">
@@ -760,16 +772,18 @@ function OperationalCostsCard({ runDetail, onSaved }) {
 }
 
 // ── Tab 3: Packing Runs ───────────────────────────────────────
-function RunsTab({ skus }) {
-  const [runs, setRuns]         = useState([])
-  const [loading, setLoading]   = useState(true)
-  const [error, setError]       = useState(null)
+function RunsTab({ skus, landedCosts }) {
+  const [runs, setRuns]             = useState([])
+  const [loading, setLoading]       = useState(true)
+  const [error, setError]           = useState(null)
   const [selectedRun, setSelectedRun] = useState(null)
-  const [runDetail, setRunDetail] = useState(null)
+  const [runDetail, setRunDetail]   = useState(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [showNewRun, setShowNewRun] = useState(false)
 
-  const [runForm, setRunForm] = useState({ run_ref: '', bulk_sku_id: '', qty_start: '', started_by: '', notes: '' })
+  const [runForm, setRunForm] = useState({
+    run_ref: '', bulk_sku_id: '', qty_start: '', started_by: '', notes: '', landed_cost_id: '',
+  })
   const [runFormError, setRunFormError] = useState(null)
   const [creatingRun, setCreatingRun]   = useState(false)
 
@@ -778,7 +792,7 @@ function RunsTab({ skus }) {
   const [outputFormError, setOutputFormError] = useState(null)
   const [addingOutput, setAddingOutput]   = useState(false)
 
-  const [showClose, setShowClose]   = useState(false)
+  const [showClose, setShowClose]     = useState(false)
   const [closeQtyEnd, setCloseQtyEnd] = useState({})
   const [closing, setClosing]         = useState(false)
   const [closeError, setCloseError]   = useState(null)
@@ -822,14 +836,15 @@ function RunsTab({ skus }) {
     setCreatingRun(true)
     try {
       const res = await repackingAPI.createRun({
-        run_ref:     runForm.run_ref || null,
-        bulk_sku_id: parseInt(runForm.bulk_sku_id),
-        qty_start:   parseFloat(runForm.qty_start),
-        started_by:  runForm.started_by || null,
-        notes:       runForm.notes || null,
+        run_ref:        runForm.run_ref || null,
+        bulk_sku_id:    parseInt(runForm.bulk_sku_id),
+        qty_start:      parseFloat(runForm.qty_start),
+        started_by:     runForm.started_by || null,
+        notes:          runForm.notes || null,
+        landed_cost_id: runForm.landed_cost_id ? parseInt(runForm.landed_cost_id) : null,
       })
       setShowNewRun(false)
-      setRunForm({ run_ref: '', bulk_sku_id: '', qty_start: '', started_by: '', notes: '' })
+      setRunForm({ run_ref: '', bulk_sku_id: '', qty_start: '', started_by: '', notes: '', landed_cost_id: '' })
       await loadRuns()
       handleSelectRun(res.data)
     } catch (e) {
@@ -883,6 +898,11 @@ function RunsTab({ skus }) {
     } finally { setClosing(false) }
   }
 
+  // Landed costs for the currently selected bulk SKU (for new run form)
+  const matchingLandedCosts = runForm.bulk_sku_id
+    ? (landedCosts || []).filter(lc => String(lc.bulk_sku_id) === String(runForm.bulk_sku_id))
+    : []
+
   // ── Run detail view ─────────────────────────────────────────
   if (selectedRun) {
     return (
@@ -909,12 +929,22 @@ function RunsTab({ skus }) {
                         <AlertTriangle size={11} /> HIGH VARIANCE
                       </span>
                     )}
+                    {runDetail.linked_batch_ref && (
+                      <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-green-100 text-green-700">
+                        📦 Batch: {runDetail.linked_batch_ref}
+                      </span>
+                    )}
                   </div>
                   <h2 className="text-lg font-bold text-gray-800">{runDetail.run_ref || `Run #${runDetail.id}`}</h2>
                   <div className="flex flex-wrap gap-4 mt-2 text-sm text-gray-500">
                     <span>Started: {runDetail.created_at ? new Date(runDetail.created_at).toLocaleString() : '—'}</span>
                     {runDetail.started_by && <span>Operator: <span className="font-medium text-gray-700">{runDetail.started_by}</span></span>}
                     {runDetail.closed_at && <span>Closed: {new Date(runDetail.closed_at).toLocaleString()}</span>}
+                    {runDetail.linked_cost_per_kg != null && (
+                      <span>
+                        Cost rate: <span className="font-medium text-green-700">${(+runDetail.linked_cost_per_kg).toFixed(4)}/kg</span>
+                      </span>
+                    )}
                   </div>
                   {runDetail.notes && <p className="text-sm text-gray-500 mt-1 italic">{runDetail.notes}</p>}
                 </div>
@@ -923,26 +953,15 @@ function RunsTab({ skus }) {
               {runDetail.status === 'closed' && (
                 <div className={`mt-4 rounded-lg p-3 ${varianceBg(runDetail.variance_pct)}`}>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-                    <div>
-                      <div className="text-xs text-gray-500 mb-0.5">Theoretical</div>
-                      <div className="font-bold text-gray-800">{(runDetail.theoretical_kg ?? 0).toFixed(3)} kg</div>
-                    </div>
-                    <div>
-                      <div className="text-xs text-gray-500 mb-0.5">Actual Used</div>
-                      <div className="font-bold text-gray-800">{(runDetail.actual_kg ?? 0).toFixed(3)} kg</div>
-                    </div>
+                    <div><div className="text-xs text-gray-500 mb-0.5">Theoretical</div><div className="font-bold text-gray-800">{(runDetail.theoretical_kg ?? 0).toFixed(3)} kg</div></div>
+                    <div><div className="text-xs text-gray-500 mb-0.5">Actual Used</div><div className="font-bold text-gray-800">{(runDetail.actual_kg ?? 0).toFixed(3)} kg</div></div>
                     <div>
                       <div className="text-xs text-gray-500 mb-0.5">Variance</div>
                       <div className={`font-bold ${varianceColor(runDetail.variance_pct)}`}>
                         {runDetail.variance_kg != null ? `${runDetail.variance_kg >= 0 ? '+' : ''}${runDetail.variance_kg.toFixed(3)} kg` : '—'}
                       </div>
                     </div>
-                    <div>
-                      <div className="text-xs text-gray-500 mb-0.5">Variance %</div>
-                      <div className={`font-bold ${varianceColor(runDetail.variance_pct)}`}>
-                        <VarianceBadge pct={runDetail.variance_pct} />
-                      </div>
-                    </div>
+                    <div><div className="text-xs text-gray-500 mb-0.5">Variance %</div><div className={`font-bold ${varianceColor(runDetail.variance_pct)}`}><VarianceBadge pct={runDetail.variance_pct} /></div></div>
                   </div>
                   {runDetail.variance_pct != null && Math.abs(runDetail.variance_pct) > 5 && (
                     <div className="mt-2 flex items-center gap-2 text-red-700 text-sm font-semibold">
@@ -1128,13 +1147,10 @@ function RunsTab({ skus }) {
               )}
             </div>
 
-            {/* Operational Costs card (new) */}
-            <OperationalCostsCard
-              runDetail={runDetail}
-              onSaved={() => loadDetail(runDetail.id)}
-            />
+            {/* Operational Costs */}
+            <OperationalCostsCard runDetail={runDetail} onSaved={() => loadDetail(runDetail.id)} />
 
-            {/* Close run section */}
+            {/* Close run */}
             {runDetail.status === 'open' && (
               <div className="card border border-orange-200 bg-orange-50">
                 <div className="flex items-center justify-between mb-2">
@@ -1237,7 +1253,7 @@ function RunsTab({ skus }) {
     )
   }
 
-  // Run list view
+  // ── Run list view ───────────────────────────────────────────
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
@@ -1261,7 +1277,7 @@ function RunsTab({ skus }) {
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">Bulk Material SKU <span className="text-red-500">*</span></label>
-                <select className="input w-full" value={runForm.bulk_sku_id} onChange={e => setRunForm(f => ({ ...f, bulk_sku_id: e.target.value }))} required>
+                <select className="input w-full" value={runForm.bulk_sku_id} onChange={e => setRunForm(f => ({ ...f, bulk_sku_id: e.target.value, landed_cost_id: '' }))} required>
                   <option value="">Select bulk material…</option>
                   {skus.map(s => <option key={s.id} value={s.id}>{s.product_name} ({s.sku_code})</option>)}
                 </select>
@@ -1271,13 +1287,38 @@ function RunsTab({ skus }) {
                 <input type="number" step="0.001" min="0.001" className="input w-full" placeholder="e.g. 1000" value={runForm.qty_start} onChange={e => setRunForm(f => ({ ...f, qty_start: e.target.value }))} required />
               </div>
               <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">
+                  Link Landed Cost Batch
+                  <span className="ml-1 text-xs text-gray-400 font-normal">(optional — for accurate costing)</span>
+                </label>
+                {runForm.bulk_sku_id && matchingLandedCosts.length === 0 ? (
+                  <div className="text-xs text-amber-600 italic mt-1 flex items-center gap-1">
+                    <AlertTriangle size={12} /> No landed costs recorded for this SKU — add one in the Landed Costs tab.
+                  </div>
+                ) : (
+                  <select
+                    className="input w-full"
+                    value={runForm.landed_cost_id}
+                    onChange={e => setRunForm(f => ({ ...f, landed_cost_id: e.target.value }))}
+                    disabled={!runForm.bulk_sku_id || matchingLandedCosts.length === 0}
+                  >
+                    <option value="">Use most recent batch automatically</option>
+                    {matchingLandedCosts.map(lc => (
+                      <option key={lc.id} value={lc.id}>
+                        {lc.batch_ref || `Batch #${lc.id}`} — ${(+lc.cost_per_kg).toFixed(4)}/kg ({(+lc.qty_kg).toFixed(0)} kg, {new Date(lc.created_at).toLocaleDateString()})
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+              <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">Operator Name</label>
                 <input type="text" className="input w-full" placeholder="Who is running this pack?" value={runForm.started_by} onChange={e => setRunForm(f => ({ ...f, started_by: e.target.value }))} />
               </div>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Notes</label>
-              <input type="text" className="input w-full" placeholder="Optional notes…" value={runForm.notes} onChange={e => setRunForm(f => ({ ...f, notes: e.target.value }))} />
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Notes</label>
+                <input type="text" className="input w-full" placeholder="Optional notes…" value={runForm.notes} onChange={e => setRunForm(f => ({ ...f, notes: e.target.value }))} />
+              </div>
             </div>
             {runFormError && <p className="text-sm text-red-600 flex items-center gap-1"><AlertTriangle size={14} /> {runFormError}</p>}
             <div className="flex gap-2">
@@ -1339,25 +1380,29 @@ function RunsTab({ skus }) {
 
 // ── Tab 4: Summary ────────────────────────────────────────────
 function SummaryTab() {
-  const [summary, setSummary]     = useState(null)
-  const [loading, setLoading]     = useState(true)
-  const [error, setError]         = useState(null)
-  const [costData, setCostData]   = useState({})   // { runId: summaryObj }
+  const [summary, setSummary]   = useState(null)
+  const [loading, setLoading]   = useState(true)
+  const [error, setError]       = useState(null)
+  const [costData, setCostData] = useState({})
   const [costsLoading, setCostsLoading] = useState(false)
+  const [fromDate, setFromDate] = useState('')
+  const [toDate, setToDate]     = useState('')
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (from, to) => {
     setLoading(true); setError(null)
     try {
-      const res = await repackingAPI.summary()
+      const params = {}
+      if (from) params.from_date = from
+      if (to)   params.to_date   = to
+      const res = await repackingAPI.summary(params)
       setSummary(res.data)
     } catch (e) {
       setError(e.response?.data?.detail || 'Failed to load summary')
     } finally { setLoading(false) }
   }, [])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { load(fromDate, toDate) }, [load, fromDate, toDate])
 
-  // After summary loads, fetch cost-summary for each closed run
   useEffect(() => {
     if (!summary) return
     const closedRuns = summary.worst_runs ?? []
@@ -1376,172 +1421,233 @@ function SummaryTab() {
     }).finally(() => setCostsLoading(false))
   }, [summary])
 
-  if (loading) return <div className="flex justify-center py-16"><Loader2 className="animate-spin text-blue-500" size={28} /></div>
-  if (error) return <div className="card text-red-600 flex items-center gap-2"><AlertTriangle size={18} /> {error}</div>
-  if (!summary) return null
-
-  const closedRunsWithCost = (summary.worst_runs ?? []).filter(r => costData[r.id]?.grand_total_cost > 0)
+  const flaggedRuns = summary?.worst_runs?.filter(r => r.flag_high_variance) ?? []
+  const closedRunsWithCost = (summary?.worst_runs ?? []).filter(r => costData[r.id]?.grand_total_cost > 0)
 
   return (
     <div className="space-y-6">
-      {/* Cost Overview (new section) */}
-      {summary.closed_runs > 0 && (
-        <div>
-          <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
-            <DollarSign size={16} className="text-green-600" /> Cost Overview
-          </h3>
-          {costsLoading ? (
-            <div className="card flex justify-center py-6"><Loader2 className="animate-spin text-blue-500" size={20} /></div>
-          ) : closedRunsWithCost.length === 0 ? (
-            <div className="card text-sm text-gray-500 py-4 text-center">
-              No cost data yet. Add landed costs and packing run costs to see a cost overview.
-            </div>
-          ) : (
-            <div className="card p-0 overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50 text-xs text-gray-500 uppercase tracking-wide">
-                  <tr>
-                    <th className="px-4 py-3 text-left">Run</th>
-                    <th className="px-4 py-3 text-left">Batch Ref</th>
-                    <th className="px-4 py-3 text-right">Total Cases</th>
-                    <th className="px-4 py-3 text-right">Bulk Material</th>
-                    <th className="px-4 py-3 text-right">Packing Costs</th>
-                    <th className="px-4 py-3 text-right font-bold text-gray-700">Grand Total</th>
-                    <th className="px-4 py-3 text-right font-bold text-gray-700">Avg Cost/Case</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {closedRunsWithCost.map(r => {
-                    const cs = costData[r.id]
-                    return (
-                      <tr key={r.id} className="hover:bg-gray-50">
-                        <td className="px-4 py-3 font-medium text-gray-800">{r.run_ref || `Run #${r.id}`}</td>
-                        <td className="px-4 py-3 text-gray-500">{cs?.landed_cost_ref || '—'}</td>
-                        <td className="px-4 py-3 text-right">{cs?.total_cases ?? '—'}</td>
-                        <td className="px-4 py-3 text-right font-mono">{cs ? fmt$(cs.bulk_material_cost) : '—'}</td>
-                        <td className="px-4 py-3 text-right font-mono">{cs ? fmt$(cs.packing_costs?.total) : '—'}</td>
-                        <td className="px-4 py-3 text-right font-mono font-bold text-gray-800">{cs ? fmt$(cs.grand_total_cost) : '—'}</td>
-                        <td className="px-4 py-3 text-right font-mono font-bold text-green-700">{cs ? fmt$(cs.grand_total_per_case_avg) : '—'}</td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
+      {/* Date filter */}
+      <div className="card py-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-sm font-medium text-gray-700">Filter by date:</span>
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-gray-500">From</label>
+            <input
+              type="date"
+              className="input text-sm py-1.5 px-2"
+              value={fromDate}
+              onChange={e => setFromDate(e.target.value)}
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-gray-500">To</label>
+            <input
+              type="date"
+              className="input text-sm py-1.5 px-2"
+              value={toDate}
+              onChange={e => setToDate(e.target.value)}
+            />
+          </div>
+          {(fromDate || toDate) && (
+            <button
+              onClick={() => { setFromDate(''); setToDate('') }}
+              className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+            >
+              Clear filter
+            </button>
           )}
-        </div>
-      )}
-
-      {/* Stats cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="card text-center">
-          <div className="text-3xl font-bold text-gray-800">{summary.total_runs}</div>
-          <div className="text-sm text-gray-500 mt-1">Total Runs</div>
-        </div>
-        <div className="card text-center">
-          <div className={`text-3xl font-bold ${summary.total_variance_kg > 0 ? 'text-red-600' : summary.total_variance_kg < 0 ? 'text-green-600' : 'text-gray-800'}`}>
-            {summary.total_variance_kg >= 0 ? '+' : ''}{summary.total_variance_kg.toFixed(2)} kg
-          </div>
-          <div className="text-sm text-gray-500 mt-1">Total Variance</div>
-        </div>
-        <div className="card text-center">
-          <div className={`text-3xl font-bold ${varianceColor(summary.avg_variance_pct)}`}>
-            {summary.avg_variance_pct >= 0 ? '+' : ''}{summary.avg_variance_pct.toFixed(1)}%
-          </div>
-          <div className="text-sm text-gray-500 mt-1">Avg Variance %</div>
-        </div>
-        <div className="card text-center">
-          <div className={`text-3xl font-bold ${summary.flagged_runs > 0 ? 'text-red-600' : 'text-green-600'}`}>
-            {summary.flagged_runs}
-          </div>
-          <div className="text-sm text-gray-500 mt-1">Flagged Runs</div>
+          {(fromDate || toDate) && summary && (
+            <span className="text-xs text-gray-400">
+              Showing {summary.total_runs} run{summary.total_runs !== 1 ? 's' : ''} in range
+            </span>
+          )}
         </div>
       </div>
 
-      {/* Worst runs table */}
-      {summary.worst_runs.length > 0 && (
-        <div>
-          <h3 className="font-semibold text-gray-800 mb-3">Closed Runs — Sorted by Worst Variance</h3>
-          <div className="card p-0 overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 text-xs text-gray-500 uppercase tracking-wide">
-                <tr>
-                  <th className="px-4 py-3 text-left">Run</th>
-                  <th className="px-4 py-3 text-left">Closed</th>
-                  <th className="px-4 py-3 text-right">Theoretical kg</th>
-                  <th className="px-4 py-3 text-right">Actual kg</th>
-                  <th className="px-4 py-3 text-right">Variance kg</th>
-                  <th className="px-4 py-3 text-right">Variance %</th>
-                  <th className="px-4 py-3 text-center">Flag</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {summary.worst_runs.map(r => (
-                  <tr key={r.id} className={r.flag_high_variance ? 'bg-red-50' : ''}>
-                    <td className="px-4 py-3 font-medium text-gray-800">{r.run_ref || `Run #${r.id}`}</td>
-                    <td className="px-4 py-3 text-gray-500 text-xs">{r.closed_at ? new Date(r.closed_at).toLocaleDateString() : '—'}</td>
-                    <td className="px-4 py-3 text-right font-mono">{(r.theoretical_kg ?? 0).toFixed(3)}</td>
-                    <td className="px-4 py-3 text-right font-mono">{(r.actual_kg ?? 0).toFixed(3)}</td>
-                    <td className={`px-4 py-3 text-right font-mono ${varianceColor(r.variance_pct)}`}>
-                      {r.variance_kg != null ? `${r.variance_kg >= 0 ? '+' : ''}${r.variance_kg.toFixed(3)}` : '—'}
-                    </td>
-                    <td className="px-4 py-3 text-right"><VarianceBadge pct={r.variance_pct} /></td>
-                    <td className="px-4 py-3 text-center">
-                      {r.flag_high_variance ? (
-                        <span className="flex items-center justify-center gap-1 text-xs text-red-700 font-semibold">
-                          <AlertTriangle size={13} /> HIGH VARIANCE
-                        </span>
-                      ) : (
-                        <span className="text-green-500"><CheckCircle2 size={14} /></span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
+      {loading ? (
+        <div className="flex justify-center py-16"><Loader2 className="animate-spin text-blue-500" size={28} /></div>
+      ) : error ? (
+        <div className="card text-red-600 flex items-center gap-2"><AlertTriangle size={18} /> {error}</div>
+      ) : !summary ? null : (
+        <>
+          {/* Flagged runs alert */}
+          {flaggedRuns.length > 0 && (
+            <div className="border border-red-300 bg-red-50 rounded-xl p-4 flex items-start gap-3">
+              <AlertTriangle size={20} className="text-red-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="font-bold text-red-800 text-sm">
+                  {flaggedRuns.length} run{flaggedRuns.length > 1 ? 's' : ''} flagged for high variance — investigate immediately
+                </p>
+                <ul className="mt-1.5 space-y-0.5">
+                  {flaggedRuns.map(r => (
+                    <li key={r.id} className="text-xs text-red-700">
+                      <strong>{r.run_ref || `Run #${r.id}`}</strong> — variance{' '}
+                      {r.variance_pct != null ? `${r.variance_pct >= 0 ? '+' : ''}${r.variance_pct.toFixed(1)}%` : '?'}
+                      {r.variance_kg != null ? ` (${r.variance_kg >= 0 ? '+' : ''}${r.variance_kg.toFixed(3)} kg unaccounted)` : ''}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          )}
 
-      {/* Breakdown by bulk SKU */}
-      {summary.sku_breakdown.length > 0 && (
-        <div>
-          <h3 className="font-semibold text-gray-800 mb-3">Breakdown by Bulk SKU</h3>
-          <div className="card p-0 overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 text-xs text-gray-500 uppercase tracking-wide">
-                <tr>
-                  <th className="px-4 py-3 text-left">Bulk SKU</th>
-                  <th className="px-4 py-3 text-right">Runs</th>
-                  <th className="px-4 py-3 text-right">Total Theoretical (kg)</th>
-                  <th className="px-4 py-3 text-right">Total Actual (kg)</th>
-                  <th className="px-4 py-3 text-right">Total Variance (kg)</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {summary.sku_breakdown.map(b => (
-                  <tr key={b.bulk_sku_id}>
-                    <td className="px-4 py-3"><div className="font-medium text-gray-800">{b.sku_name}</div><div className="text-xs text-gray-400">{b.sku_code}</div></td>
-                    <td className="px-4 py-3 text-right">{b.runs_count}</td>
-                    <td className="px-4 py-3 text-right font-mono">{b.total_theoretical.toFixed(3)}</td>
-                    <td className="px-4 py-3 text-right font-mono">{b.total_actual.toFixed(3)}</td>
-                    <td className={`px-4 py-3 text-right font-mono ${b.total_variance > 0 ? 'text-red-600' : b.total_variance < 0 ? 'text-green-600' : 'text-gray-500'}`}>
-                      {b.total_variance >= 0 ? '+' : ''}{b.total_variance.toFixed(3)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
+          {/* Cost Overview */}
+          {summary.closed_runs > 0 && (
+            <div>
+              <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
+                <DollarSign size={16} className="text-green-600" /> Cost Overview
+              </h3>
+              {costsLoading ? (
+                <div className="card flex justify-center py-6"><Loader2 className="animate-spin text-blue-500" size={20} /></div>
+              ) : closedRunsWithCost.length === 0 ? (
+                <div className="card text-sm text-gray-500 py-4 text-center">
+                  No cost data yet. Add landed costs and packing run costs to see a cost overview.
+                </div>
+              ) : (
+                <div className="card p-0 overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 text-xs text-gray-500 uppercase tracking-wide">
+                      <tr>
+                        <th className="px-4 py-3 text-left">Run</th>
+                        <th className="px-4 py-3 text-left">Batch Ref</th>
+                        <th className="px-4 py-3 text-right">Total Cases</th>
+                        <th className="px-4 py-3 text-right">Bulk Material</th>
+                        <th className="px-4 py-3 text-right">Packing Costs</th>
+                        <th className="px-4 py-3 text-right font-bold text-gray-700">Grand Total</th>
+                        <th className="px-4 py-3 text-right font-bold text-gray-700">Avg Cost/Case</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {closedRunsWithCost.map(r => {
+                        const cs = costData[r.id]
+                        return (
+                          <tr key={r.id} className="hover:bg-gray-50">
+                            <td className="px-4 py-3 font-medium text-gray-800">{r.run_ref || `Run #${r.id}`}</td>
+                            <td className="px-4 py-3 text-gray-500">{cs?.landed_cost_ref || '—'}</td>
+                            <td className="px-4 py-3 text-right">{cs?.total_cases ?? '—'}</td>
+                            <td className="px-4 py-3 text-right font-mono">{cs ? fmt$(cs.bulk_material_cost) : '—'}</td>
+                            <td className="px-4 py-3 text-right font-mono">{cs ? fmt$(cs.packing_costs?.total) : '—'}</td>
+                            <td className="px-4 py-3 text-right font-mono font-bold text-gray-800">{cs ? fmt$(cs.grand_total_cost) : '—'}</td>
+                            <td className="px-4 py-3 text-right font-mono font-bold text-green-700">{cs ? fmt$(cs.grand_total_per_case_avg) : '—'}</td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
 
-      {summary.closed_runs === 0 && (
-        <div className="card text-center py-12 text-gray-400">
-          <Factory size={36} className="mx-auto mb-3 opacity-30" />
-          <p className="font-medium">No closed runs yet.</p>
-          <p className="text-sm mt-1">Summary statistics will appear once runs are completed.</p>
-        </div>
+          {/* Stats cards */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="card text-center">
+              <div className="text-3xl font-bold text-gray-800">{summary.total_runs}</div>
+              <div className="text-sm text-gray-500 mt-1">Total Runs</div>
+            </div>
+            <div className="card text-center">
+              <div className={`text-3xl font-bold ${summary.total_variance_kg > 0 ? 'text-red-600' : summary.total_variance_kg < 0 ? 'text-green-600' : 'text-gray-800'}`}>
+                {summary.total_variance_kg >= 0 ? '+' : ''}{summary.total_variance_kg.toFixed(2)} kg
+              </div>
+              <div className="text-sm text-gray-500 mt-1">Total Variance</div>
+            </div>
+            <div className="card text-center">
+              <div className={`text-3xl font-bold ${varianceColor(summary.avg_variance_pct)}`}>
+                {summary.avg_variance_pct >= 0 ? '+' : ''}{summary.avg_variance_pct.toFixed(1)}%
+              </div>
+              <div className="text-sm text-gray-500 mt-1">Avg Variance %</div>
+            </div>
+            <div className="card text-center">
+              <div className={`text-3xl font-bold ${summary.flagged_runs > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                {summary.flagged_runs}
+              </div>
+              <div className="text-sm text-gray-500 mt-1">Flagged Runs</div>
+            </div>
+          </div>
+
+          {/* Worst runs */}
+          {summary.worst_runs.length > 0 && (
+            <div>
+              <h3 className="font-semibold text-gray-800 mb-3">Closed Runs — Sorted by Worst Variance</h3>
+              <div className="card p-0 overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 text-xs text-gray-500 uppercase tracking-wide">
+                    <tr>
+                      <th className="px-4 py-3 text-left">Run</th>
+                      <th className="px-4 py-3 text-left">Closed</th>
+                      <th className="px-4 py-3 text-right">Theoretical kg</th>
+                      <th className="px-4 py-3 text-right">Actual kg</th>
+                      <th className="px-4 py-3 text-right">Variance kg</th>
+                      <th className="px-4 py-3 text-right">Variance %</th>
+                      <th className="px-4 py-3 text-center">Flag</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {summary.worst_runs.map(r => (
+                      <tr key={r.id} className={r.flag_high_variance ? 'bg-red-50' : ''}>
+                        <td className="px-4 py-3 font-medium text-gray-800">{r.run_ref || `Run #${r.id}`}</td>
+                        <td className="px-4 py-3 text-gray-500 text-xs">{r.closed_at ? new Date(r.closed_at).toLocaleDateString() : '—'}</td>
+                        <td className="px-4 py-3 text-right font-mono">{(r.theoretical_kg ?? 0).toFixed(3)}</td>
+                        <td className="px-4 py-3 text-right font-mono">{(r.actual_kg ?? 0).toFixed(3)}</td>
+                        <td className={`px-4 py-3 text-right font-mono ${varianceColor(r.variance_pct)}`}>
+                          {r.variance_kg != null ? `${r.variance_kg >= 0 ? '+' : ''}${r.variance_kg.toFixed(3)}` : '—'}
+                        </td>
+                        <td className="px-4 py-3 text-right"><VarianceBadge pct={r.variance_pct} /></td>
+                        <td className="px-4 py-3 text-center">
+                          {r.flag_high_variance
+                            ? <span className="flex items-center justify-center gap-1 text-xs text-red-700 font-semibold"><AlertTriangle size={13} /> HIGH VARIANCE</span>
+                            : <span className="text-green-500"><CheckCircle2 size={14} /></span>
+                          }
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Breakdown by bulk SKU */}
+          {summary.sku_breakdown.length > 0 && (
+            <div>
+              <h3 className="font-semibold text-gray-800 mb-3">Breakdown by Bulk SKU</h3>
+              <div className="card p-0 overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 text-xs text-gray-500 uppercase tracking-wide">
+                    <tr>
+                      <th className="px-4 py-3 text-left">Bulk SKU</th>
+                      <th className="px-4 py-3 text-right">Runs</th>
+                      <th className="px-4 py-3 text-right">Total Theoretical (kg)</th>
+                      <th className="px-4 py-3 text-right">Total Actual (kg)</th>
+                      <th className="px-4 py-3 text-right">Total Variance (kg)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {summary.sku_breakdown.map(b => (
+                      <tr key={b.bulk_sku_id}>
+                        <td className="px-4 py-3"><div className="font-medium text-gray-800">{b.sku_name}</div><div className="text-xs text-gray-400">{b.sku_code}</div></td>
+                        <td className="px-4 py-3 text-right">{b.runs_count}</td>
+                        <td className="px-4 py-3 text-right font-mono">{b.total_theoretical.toFixed(3)}</td>
+                        <td className="px-4 py-3 text-right font-mono">{b.total_actual.toFixed(3)}</td>
+                        <td className={`px-4 py-3 text-right font-mono ${b.total_variance > 0 ? 'text-red-600' : b.total_variance < 0 ? 'text-green-600' : 'text-gray-500'}`}>
+                          {b.total_variance >= 0 ? '+' : ''}{b.total_variance.toFixed(3)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {summary.closed_runs === 0 && (
+            <div className="card text-center py-12 text-gray-400">
+              <Factory size={36} className="mx-auto mb-3 opacity-30" />
+              <p className="font-medium">No closed runs yet{(fromDate || toDate) ? ' in this date range' : ''}.</p>
+              <p className="text-sm mt-1">Summary statistics will appear once runs are completed.</p>
+            </div>
+          )}
+        </>
       )}
     </div>
   )
@@ -1551,24 +1657,45 @@ function SummaryTab() {
 const TABS = ['Bills of Materials', 'Landed Costs', 'Packing Runs', 'Summary']
 
 export default function Repacking() {
-  const [activeTab, setActiveTab]     = useState(2)  // default: Packing Runs (now tab 2)
-  const [skus, setSkus]               = useState([])
-  const [skusLoading, setSkusLoading] = useState(true)
+  const [activeTab, setActiveTab]       = useState(2)
+  const [skus, setSkus]                 = useState([])
+  const [skusLoading, setSkusLoading]   = useState(true)
+  const [landedCosts, setLandedCosts]   = useState([])
+  const [flaggedCount, setFlaggedCount] = useState(0)
 
+  // Load SKUs and landed costs together on mount
   useEffect(() => {
-    const loadSkus = async () => {
+    const init = async () => {
       try {
-        const res = await skuAPI.list({ limit: 500 })
-        const items = Array.isArray(res.data) ? res.data : (res.data?.items || res.data?.skus || [])
+        const [skuRes, lcRes, sumRes] = await Promise.all([
+          skuAPI.list({ limit: 500 }),
+          repackingAPI.listLandedCosts(),
+          repackingAPI.summary({}),
+        ])
+        const items = Array.isArray(skuRes.data) ? skuRes.data : (skuRes.data?.items || skuRes.data?.skus || [])
         setSkus(items)
+        setLandedCosts(Array.isArray(lcRes.data) ? lcRes.data : [])
+        setFlaggedCount(sumRes.data?.flagged_runs ?? 0)
       } catch {
         setSkus([])
+        setLandedCosts([])
       } finally {
         setSkusLoading(false)
       }
     }
-    loadSkus()
+    init()
   }, [])
+
+  // Refresh landed costs when user switches to that tab (they may have added one)
+  const handleTabChange = async (i) => {
+    setActiveTab(i)
+    if (i === 1) {
+      try {
+        const res = await repackingAPI.listLandedCosts()
+        setLandedCosts(Array.isArray(res.data) ? res.data : [])
+      } catch {}
+    }
+  }
 
   return (
     <div className="max-w-6xl mx-auto">
@@ -1582,31 +1709,46 @@ export default function Repacking() {
         </p>
       </div>
 
+      {/* Global flagged-runs banner (always visible, all tabs) */}
+      {flaggedCount > 0 && (
+        <div className="mb-4 flex items-center gap-3 bg-red-50 border border-red-300 rounded-xl px-4 py-3">
+          <AlertTriangle size={18} className="text-red-600 flex-shrink-0" />
+          <p className="text-sm text-red-800 font-medium flex-1">
+            <strong>{flaggedCount} packing run{flaggedCount > 1 ? 's' : ''}</strong> flagged for high variance.
+            Check the <button onClick={() => setActiveTab(3)} className="underline font-bold">Summary tab</button> to investigate.
+          </p>
+        </div>
+      )}
+
+      <SetupGuide />
+
       <div className="flex gap-1 mb-6 bg-gray-100 rounded-xl p-1 w-fit">
         {TABS.map((tab, i) => (
           <button
             key={tab}
-            onClick={() => setActiveTab(i)}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+            onClick={() => handleTabChange(i)}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors relative ${
               activeTab === i
                 ? 'bg-white text-blue-600 shadow-sm'
                 : 'text-gray-600 hover:text-gray-800'
             }`}
           >
             {tab}
+            {/* Red dot on Summary tab when there are flagged runs */}
+            {i === 3 && flaggedCount > 0 && (
+              <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full" />
+            )}
           </button>
         ))}
       </div>
 
       {skusLoading ? (
-        <div className="flex justify-center py-16">
-          <Loader2 className="animate-spin text-blue-500" size={28} />
-        </div>
+        <div className="flex justify-center py-16"><Loader2 className="animate-spin text-blue-500" size={28} /></div>
       ) : (
         <>
           {activeTab === 0 && <BOMTab skus={skus} />}
           {activeTab === 1 && <LandedCostsTab skus={skus} />}
-          {activeTab === 2 && <RunsTab skus={skus} />}
+          {activeTab === 2 && <RunsTab skus={skus} landedCosts={landedCosts} />}
           {activeTab === 3 && <SummaryTab />}
         </>
       )}
