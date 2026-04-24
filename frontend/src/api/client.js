@@ -487,11 +487,12 @@ export const repackingAPI = {
   updateLandedCost: (id, data) => api.put(`/repacking/landed-costs/${id}`, data),
   deleteLandedCost: (id)       => api.delete(`/repacking/landed-costs/${id}`),
   // Multi-SKU purchase batches
-  listPurchases:   ()         => api.get('/repacking/purchases'),
-  createPurchase:  (data)     => api.post('/repacking/purchases', data),
-  getPurchase:     (id)       => api.get(`/repacking/purchases/${id}`),
-  updatePurchase:  (id, data) => api.put(`/repacking/purchases/${id}`, data),
-  deletePurchase:  (id)       => api.delete(`/repacking/purchases/${id}`),
+  listPurchases:        ()         => api.get('/repacking/purchases'),
+  createPurchase:       (data)     => api.post('/repacking/purchases', data),
+  getPurchase:          (id)       => api.get(`/repacking/purchases/${id}`),
+  updatePurchase:       (id, data) => api.put(`/repacking/purchases/${id}`, data),
+  deletePurchase:       (id)       => api.delete(`/repacking/purchases/${id}`),
+  getPurchaseUtilisation: (id)     => api.get(`/repacking/purchases/${id}/utilisation`),
   // Run costs
   getRunCosts:     (runId)    => api.get(`/repacking/runs/${runId}/costs`),
   saveRunCosts:    (runId, d) => api.post(`/repacking/runs/${runId}/costs`, d),

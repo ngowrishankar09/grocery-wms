@@ -347,6 +347,7 @@ function PurchasesTab({ skus }) {
   const [loading, setLoading]       = useState(true)
   const [error, setError]           = useState(null)
   const [expandedId, setExpandedId] = useState(null)
+  const [utilisation, setUtilisation] = useState({})   // {batchId: data | 'loading' | null}
   const [showForm, setShowForm]     = useState(false)
   const [editId, setEditId]         = useState(null)
   const [saving, setSaving]         = useState(false)
@@ -355,7 +356,7 @@ function PurchasesTab({ skus }) {
 
   const emptyLine = () => ({ bulk_sku_id: '', qty_kg: '', cost_material: '', cost_packaging_mat: '', cost_labor: '' })
   const emptyForm = () => ({
-    batch_ref: '', supplier: '', currency: 'USD', purchase_date: '',
+    batch_ref: '', supplier: '', currency: 'USD', purchase_date: '', exchange_rate: '1',
     shared_freight: '', shared_duty: '', shared_overhead: '', shared_other: '',
     notes: '',
     lines: [emptyLine()],
@@ -390,7 +391,9 @@ function PurchasesTab({ skus }) {
       (parseFloat(line.cost_packaging_mat) || 0) +
       (parseFloat(line.cost_labor)         || 0) +
       allocFreight + allocDuty + allocOverhead + allocOther
-    return lineCost / lineKg
+    const cpk = lineCost / lineKg
+    const fx  = parseFloat(form.exchange_rate) || 1.0
+    return { cpk, cpkBase: cpk * fx, fx, isForeign: form.currency !== 'USD' }
   }
 
   const addLine    = () => setForm(f => ({ ...f, lines: [...f.lines, emptyLine()] }))
@@ -418,6 +421,7 @@ function PurchasesTab({ skus }) {
         supplier:        d.supplier       || '',
         currency:        d.currency       || 'USD',
         purchase_date:   d.purchase_date  || '',
+        exchange_rate:   String(d.exchange_rate ?? 1),
         shared_freight:  String(d.shared_freight  ?? 0),
         shared_duty:     String(d.shared_duty     ?? 0),
         shared_overhead: String(d.shared_overhead ?? 0),
@@ -447,6 +451,7 @@ function PurchasesTab({ skus }) {
       supplier:        form.supplier      || null,
       currency:        form.currency,
       purchase_date:   form.purchase_date || null,
+      exchange_rate:   parseFloat(form.exchange_rate) || 1.0,
       shared_freight:  parseFloat(form.shared_freight)  || 0,
       shared_duty:     parseFloat(form.shared_duty)     || 0,
       shared_overhead: parseFloat(form.shared_overhead) || 0,
@@ -526,11 +531,33 @@ function PurchasesTab({ skus }) {
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">Currency</label>
-                  <select className="input w-full" value={form.currency} onChange={e => setForm(f => ({ ...f, currency: e.target.value }))}>
+                  <select className="input w-full" value={form.currency} onChange={e => setForm(f => ({ ...f, currency: e.target.value, exchange_rate: e.target.value === 'USD' ? '1' : f.exchange_rate }))}>
                     {['USD','AUD','EUR','GBP','CAD','INR','NZD'].map(c => <option key={c} value={c}>{c}</option>)}
                   </select>
                 </div>
               </div>
+              {/* Exchange rate row — only show when currency ≠ USD */}
+              {form.currency !== 'USD' && (
+                <div className="mt-3 flex items-end gap-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                  <div className="flex-1">
+                    <label className="block text-xs font-medium text-gray-700 mb-1">
+                      Exchange Rate to USD
+                      <span className="ml-1 text-gray-400 font-normal">(1 {form.currency} = ? USD)</span>
+                    </label>
+                    <input
+                      type="number" step="0.000001" min="0.000001" className="input w-full"
+                      placeholder={`e.g. 1 ${form.currency} = 0.012 USD`}
+                      value={form.exchange_rate}
+                      onChange={e => setForm(f => ({ ...f, exchange_rate: e.target.value }))}
+                    />
+                  </div>
+                  <div className="text-sm text-amber-700 pb-1">
+                    {parseFloat(form.exchange_rate) > 0
+                      ? <span>All {form.currency} amounts × <strong>{parseFloat(form.exchange_rate).toFixed(6)}</strong> → USD for cost summaries</span>
+                      : <span className="text-red-600">Enter a valid exchange rate</span>}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* ── Shared costs ────────────────────────────────── */}
@@ -624,9 +651,15 @@ function PurchasesTab({ skus }) {
                       {preview != null && (
                         <div className="mt-2 flex flex-wrap items-center gap-3">
                           <div className="flex items-center gap-1.5">
-                            <span className="text-xs text-gray-500">Allocated cost/kg:</span>
-                            <span className="text-sm font-bold text-green-700">${preview.toFixed(4)}/kg</span>
+                            <span className="text-xs text-gray-500">Cost/kg ({form.currency}):</span>
+                            <span className="text-sm font-bold text-green-700">{preview.cpk.toFixed(4)} {form.currency}</span>
                           </div>
+                          {preview.isForeign && (
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-xs text-gray-500">Cost/kg (USD):</span>
+                              <span className="text-sm font-bold text-blue-700">${preview.cpkBase.toFixed(4)}</span>
+                            </div>
+                          )}
                           {shareLabel && (
                             <span className="text-xs text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">{shareLabel}</span>
                           )}
@@ -674,7 +707,16 @@ function PurchasesTab({ skus }) {
               {/* Batch header */}
               <div
                 className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-gray-50 transition-colors"
-                onClick={() => setExpandedId(expandedId === purchase.id ? null : purchase.id)}
+                onClick={() => {
+                  const next = expandedId === purchase.id ? null : purchase.id
+                  setExpandedId(next)
+                  if (next && !utilisation[next]) {
+                    setUtilisation(u => ({ ...u, [next]: 'loading' }))
+                    repackingAPI.getPurchaseUtilisation(next)
+                      .then(r => setUtilisation(u => ({ ...u, [next]: r.data })))
+                      .catch(() => setUtilisation(u => ({ ...u, [next]: null })))
+                  }
+                }}
               >
                 <div className="flex items-center gap-3">
                   <span className={`text-gray-400 transition-transform duration-150 ${expandedId === purchase.id ? 'rotate-180' : ''}`}>
@@ -685,6 +727,11 @@ function PurchasesTab({ skus }) {
                       <span className="font-semibold text-gray-800">{purchase.batch_ref || `Batch #${purchase.id}`}</span>
                       {purchase.supplier && <span className="text-xs text-gray-500">· {purchase.supplier}</span>}
                       <span className="text-xs px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded font-mono">{purchase.currency}</span>
+                      {purchase.exchange_rate && purchase.exchange_rate !== 1 && (
+                        <span className="text-xs px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded font-mono">
+                          @{(+purchase.exchange_rate).toFixed(4)} USD
+                        </span>
+                      )}
                     </div>
                     <div className="text-xs text-gray-400 mt-0.5">
                       {purchase.purchase_date
@@ -737,6 +784,7 @@ function PurchasesTab({ skus }) {
                             <th className="px-4 py-2 text-right">Labor</th>
                             <th className="px-4 py-2 text-right font-bold text-gray-700">Total</th>
                             <th className="px-4 py-2 text-right font-bold text-green-700">Cost/kg</th>
+                            {purchase.currency !== 'USD' && <th className="px-4 py-2 text-right font-bold text-blue-700">Cost/kg (USD)</th>}
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100">
@@ -754,8 +802,13 @@ function PurchasesTab({ skus }) {
                               <td className="px-4 py-2.5 text-right font-mono">{fmt$(item.cost_labor)}</td>
                               <td className="px-4 py-2.5 text-right font-mono font-bold text-gray-800">{fmt$(item.total_cost)}</td>
                               <td className="px-4 py-2.5 text-right font-mono font-bold text-green-700">
-                                {item.cost_per_kg != null ? `$${(+item.cost_per_kg).toFixed(4)}/kg` : '—'}
+                                {item.cost_per_kg != null ? `${(+item.cost_per_kg).toFixed(4)} ${purchase.currency}/kg` : '—'}
                               </td>
+                              {purchase.currency !== 'USD' && (
+                                <td className="px-4 py-2.5 text-right font-mono font-bold text-blue-700">
+                                  {item.cost_per_kg_base != null ? `$${(+item.cost_per_kg_base).toFixed(4)}/kg` : '—'}
+                                </td>
+                              )}
                             </tr>
                           ))}
                         </tbody>
@@ -767,6 +820,62 @@ function PurchasesTab({ skus }) {
                   {purchase.notes && (
                     <div className="px-4 py-2 text-xs text-gray-500 italic border-t border-gray-100 bg-gray-50">{purchase.notes}</div>
                   )}
+                  {/* ── Utilisation section ───────────────────── */}
+                  <div className="border-t border-gray-200 px-4 py-3 bg-gray-50">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">
+                      📦 Cases Packed from this Purchase
+                    </p>
+                    {utilisation[purchase.id] === 'loading' ? (
+                      <div className="flex items-center gap-2 text-xs text-gray-400 py-1">
+                        <Loader2 size={12} className="animate-spin" /> Loading packing runs…
+                      </div>
+                    ) : !utilisation[purchase.id] || utilisation[purchase.id].total_runs === 0 ? (
+                      <p className="text-xs text-gray-400 italic">
+                        No packing runs linked to this batch yet. When you start a run and select a landed cost from this purchase, it will appear here.
+                      </p>
+                    ) : (() => {
+                      const u = utilisation[purchase.id]
+                      return (
+                        <div className="space-y-2">
+                          {/* Totals row */}
+                          <div className="flex flex-wrap gap-4 text-sm">
+                            <div className="flex items-center gap-1.5 bg-green-100 text-green-800 px-3 py-1.5 rounded-lg font-semibold">
+                              <Package size={14} />
+                              {u.total_cases.toLocaleString()} cases packed total
+                            </div>
+                            <div className="flex items-center gap-1.5 bg-blue-100 text-blue-800 px-3 py-1.5 rounded-lg font-semibold">
+                              <Scale size={14} />
+                              {u.total_kg_consumed.toFixed(1)} kg consumed ({purchase.total_kg > 0 ? `${((u.total_kg_consumed / purchase.total_kg) * 100).toFixed(1)}% of ${purchase.total_kg.toFixed(0)} kg bought` : 'of purchased qty'})
+                            </div>
+                            <div className="text-xs text-gray-500 self-center">{u.total_runs} packing run{u.total_runs !== 1 ? 's' : ''}</div>
+                          </div>
+                          {/* SKU totals */}
+                          {u.sku_totals?.length > 0 && (
+                            <div className="flex flex-wrap gap-2">
+                              {u.sku_totals.map(s => (
+                                <span key={s.sku_id} className="text-xs bg-white border border-gray-200 px-2 py-1 rounded font-medium text-gray-700">
+                                  {s.sku_name}: <span className="text-green-700 font-bold">{s.total_cases.toLocaleString()} cases</span>
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                          {/* Run list */}
+                          <div className="space-y-1 mt-1">
+                            {u.runs.map(r => (
+                              <div key={r.run_id} className="flex items-center justify-between text-xs bg-white border border-gray-100 rounded px-3 py-1.5">
+                                <span className="font-medium text-gray-700">{r.run_ref || `Run #${r.run_id}`}</span>
+                                <span className="text-gray-500">{r.linked_bulk_sku}</span>
+                                <span className={`px-1.5 py-0.5 rounded-full font-semibold ${r.status === 'closed' ? 'bg-gray-200 text-gray-600' : 'bg-blue-100 text-blue-700'}`}>{r.status}</span>
+                                <span className="font-bold text-green-700">{r.total_cases} cases</span>
+                                <span className="text-gray-400">{r.kg_consumed.toFixed(1)} kg</span>
+                                <span className="text-gray-400">{r.created_at ? new Date(r.created_at).toLocaleDateString() : '—'}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )
+                    })()}
+                  </div>
                 </div>
               )}
             </div>
@@ -929,9 +1038,19 @@ function OperationalCostsCard({ runDetail, onSaved }) {
             <div className="space-y-1">
               <div className="text-green-400 font-bold uppercase tracking-wide text-xs">
                 Bulk Material Cost {summary.landed_cost_ref ? `(Batch: "${summary.landed_cost_ref}")` : '(most recent batch)'}
+                {summary.landed_cost_currency && summary.landed_cost_currency !== 'USD' && (
+                  <span className="ml-2 text-amber-400 normal-case font-normal text-xs">
+                    · Purchase in {summary.landed_cost_currency} @ {(summary.landed_cost_exchange_rate || 1).toFixed(4)} USD
+                  </span>
+                )}
               </div>
               <div className="flex justify-between text-gray-200">
-                <span>{(+summary.total_theoretical_kg).toFixed(3)} kg × ${(+summary.cost_per_kg).toFixed(4)}/kg</span>
+                <span>
+                  {(+summary.total_theoretical_kg).toFixed(3)} kg × ${(+summary.cost_per_kg).toFixed(4)}/kg
+                  {summary.landed_cost_currency && summary.landed_cost_currency !== 'USD' && (
+                    <span className="text-gray-400 ml-1 text-xs">(USD)</span>
+                  )}
+                </span>
                 <span className="font-bold text-white">{fmt$(summary.bulk_material_cost)}</span>
               </div>
             </div>
@@ -963,7 +1082,7 @@ function OperationalCostsCard({ runDetail, onSaved }) {
                     </div>
                     {o.bom_qty_per_unit != null && (
                       <div className="flex justify-between text-gray-400 pl-4">
-                        <span>Material: {o.bom_qty_per_unit} kg × ${(+summary.cost_per_kg).toFixed(4)}</span>
+                        <span>Material: {o.bom_qty_per_unit} kg × ${(+summary.cost_per_kg).toFixed(4)}/kg USD</span>
                         <span>{fmt$(o.material_per_case)}/case</span>
                       </div>
                     )}

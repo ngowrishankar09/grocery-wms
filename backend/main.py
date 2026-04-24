@@ -166,7 +166,9 @@ def _migrate():
         ("packing_runs",        "landed_cost_id",    "INTEGER"),
         ("landed_costs",        "purchase_batch_id", "INTEGER"),
         # Purchase batch improvements
-        ("landed_cost_batches", "purchase_date",     "DATE"),
+        ("landed_cost_batches", "purchase_date",  "DATE"),
+        ("landed_cost_batches", "exchange_rate",  "FLOAT DEFAULT 1.0"),
+        ("landed_costs",        "exchange_rate",  "FLOAT DEFAULT 1.0"),
     ]
     # Use IF NOT EXISTS for PostgreSQL (idempotent); fall back to try/except for SQLite
     add_col = "ADD COLUMN IF NOT EXISTS" if is_postgres else "ADD COLUMN"

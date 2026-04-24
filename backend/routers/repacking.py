@@ -87,6 +87,7 @@ class PurchaseBatchIn(BaseModel):
     supplier:        Optional[str]  = None
     currency:        str            = "USD"
     purchase_date:   Optional[date] = None   # date goods were purchased / invoiced
+    exchange_rate:   float          = 1.0    # FX rate: 1 foreign unit → 1 base unit (e.g. 1 INR → 0.012 USD)
     shared_freight:  float          = 0.0
     shared_duty:     float          = 0.0
     shared_overhead: float          = 0.0
@@ -765,9 +766,10 @@ def _allocate_and_save_lines(
         if line.bulk_sku_id in existing:
             # Update in-place — preserves the ID
             lc = existing[line.bulk_sku_id]
-            lc.qty_kg    = line.qty_kg
-            lc.batch_ref = batch.batch_ref
-            lc.currency  = batch.currency
+            lc.qty_kg        = line.qty_kg
+            lc.batch_ref     = batch.batch_ref
+            lc.currency      = batch.currency
+            lc.exchange_rate = batch.exchange_rate
         else:
             lc = LandedCost(
                 company_id        = company_id,
@@ -776,6 +778,7 @@ def _allocate_and_save_lines(
                 qty_kg            = line.qty_kg,
                 batch_ref         = batch.batch_ref,
                 currency          = batch.currency,
+                exchange_rate     = batch.exchange_rate,
             )
             db.add(lc)
 
@@ -798,6 +801,7 @@ def _fmt_batch(batch: LandedCostBatch, db: Session) -> dict:
         "supplier":       batch.supplier,
         "currency":       batch.currency,
         "purchase_date":  batch.purchase_date.isoformat() if getattr(batch, "purchase_date", None) else None,
+        "exchange_rate":  getattr(batch, "exchange_rate", 1.0) or 1.0,
         "shared_freight": batch.shared_freight,
         "shared_duty":    batch.shared_duty,
         "shared_overhead": batch.shared_overhead,
@@ -841,6 +845,9 @@ def _fmt_landed(lc: LandedCost, db: Session) -> dict:
         "cost_other":        lc.cost_other,
         "total_cost":        lc.total_cost,
         "cost_per_kg":       lc.cost_per_kg,
+        "exchange_rate":     getattr(lc, "exchange_rate", 1.0) or 1.0,
+        # cost_per_kg_base: cost per kg converted to base/reporting currency
+        "cost_per_kg_base":  round((lc.cost_per_kg or 0) * (getattr(lc, "exchange_rate", 1.0) or 1.0), 6),
         "currency":          lc.currency,
         "notes":             lc.notes,
         "created_at":        lc.created_at.isoformat() if lc.created_at else None,
@@ -989,6 +996,7 @@ def create_purchase(
         supplier        = body.supplier,
         currency        = body.currency,
         purchase_date   = body.purchase_date,
+        exchange_rate   = body.exchange_rate if body.exchange_rate and body.exchange_rate > 0 else 1.0,
         shared_freight  = body.shared_freight,
         shared_duty     = body.shared_duty,
         shared_overhead = body.shared_overhead,
@@ -1048,6 +1056,7 @@ def update_purchase(
     batch.supplier        = body.supplier
     batch.currency        = body.currency
     batch.purchase_date   = body.purchase_date
+    batch.exchange_rate   = body.exchange_rate if body.exchange_rate and body.exchange_rate > 0 else 1.0
     batch.shared_freight  = body.shared_freight
     batch.shared_duty     = body.shared_duty
     batch.shared_overhead = body.shared_overhead
@@ -1078,6 +1087,92 @@ def delete_purchase(
     db.delete(batch)
     db.commit()
     return None
+
+
+@router.get("/purchases/{batch_id}/utilisation")
+def get_purchase_utilisation(
+    batch_id:   int,
+    db:         Session = Depends(get_db),
+    company_id: int     = Depends(get_company_id),
+):
+    """
+    For a purchase batch, show all packing runs that explicitly linked to any of its
+    LandedCost rows, with cases packed and kg consumed per run.
+    This answers: "how many cases did I get from this purchase?"
+    """
+    batch = db.query(LandedCostBatch).filter(
+        LandedCostBatch.id == batch_id,
+        LandedCostBatch.company_id == company_id,
+    ).first()
+    if not batch:
+        raise HTTPException(status_code=404, detail="Purchase not found")
+
+    # All LandedCost IDs belonging to this batch
+    lc_rows = db.query(LandedCost).filter(LandedCost.purchase_batch_id == batch_id).all()
+    lc_ids  = [lc.id for lc in lc_rows]
+    lc_by_id = {lc.id: lc for lc in lc_rows}
+
+    runs = []
+    total_cases = 0
+    total_kg_consumed = 0.0
+    # SKU-level aggregation: {sku_id: {name, code, total_cases}}
+    sku_totals: dict = {}
+
+    if lc_ids:
+        linked_runs = (
+            db.query(PackingRun)
+            .filter(
+                PackingRun.landed_cost_id.in_(lc_ids),
+                PackingRun.company_id == company_id,
+            )
+            .order_by(PackingRun.created_at.desc())
+            .all()
+        )
+        for run in linked_runs:
+            outputs     = db.query(PackingRunOutput).filter(PackingRunOutput.run_id == run.id).all()
+            bulk_entrs  = db.query(PackingRunBulk).filter(PackingRunBulk.run_id == run.id).all()
+            run_cases   = sum(o.qty_packed for o in outputs)
+            run_kg      = sum((b.actual_used or 0.0) for b in bulk_entrs)
+            total_cases      += run_cases
+            total_kg_consumed += run_kg
+
+            linked_lc = lc_by_id.get(run.landed_cost_id)
+            output_list = []
+            for o in outputs:
+                sku_id = o.sku_id
+                name   = _sku_name(db, sku_id)
+                code   = _sku_code(db, sku_id)
+                output_list.append({
+                    "sku_id":    sku_id,
+                    "sku_name":  name,
+                    "sku_code":  code,
+                    "qty_packed": o.qty_packed,
+                })
+                if sku_id not in sku_totals:
+                    sku_totals[sku_id] = {"sku_id": sku_id, "sku_name": name, "sku_code": code, "total_cases": 0}
+                sku_totals[sku_id]["total_cases"] += o.qty_packed
+
+            runs.append({
+                "run_id":            run.id,
+                "run_ref":           run.run_ref,
+                "status":            run.status,
+                "created_at":        run.created_at.isoformat() if run.created_at else None,
+                "closed_at":         run.closed_at.isoformat() if run.closed_at else None,
+                "total_cases":       run_cases,
+                "kg_consumed":       round(run_kg, 3),
+                "linked_bulk_sku":   _sku_name(db, linked_lc.bulk_sku_id) if linked_lc else None,
+                "outputs":           output_list,
+            })
+
+    return {
+        "batch_id":           batch_id,
+        "batch_ref":          batch.batch_ref,
+        "total_runs":         len(runs),
+        "total_cases":        total_cases,
+        "total_kg_consumed":  round(total_kg_consumed, 3),
+        "sku_totals":         list(sku_totals.values()),
+        "runs":               runs,
+    }
 
 
 # ── Add Bulk Material to Packing Run ─────────────────────────────
@@ -1271,14 +1366,19 @@ def get_cost_summary(
     cpk_by_bulk_sku: dict = {}
     lc_info_by_bulk_sku: dict = {}  # for display metadata
 
+    def _lc_cpk_base(lc: LandedCost) -> float:
+        """Return cost_per_kg converted to base currency using exchange_rate."""
+        raw = lc.cost_per_kg or 0.0
+        fx  = getattr(lc, "exchange_rate", 1.0) or 1.0
+        return raw * fx
+
     if run_lc_id is not None:
-        # Explicit link — fetch the linked LandedCost and use it for its own SKU
         linked_lc = db.query(LandedCost).filter(
             LandedCost.id == run_lc_id,
             LandedCost.company_id == company_id,
         ).first()
         if linked_lc:
-            cpk_by_bulk_sku[linked_lc.bulk_sku_id] = linked_lc.cost_per_kg or 0.0
+            cpk_by_bulk_sku[linked_lc.bulk_sku_id] = _lc_cpk_base(linked_lc)
             lc_info_by_bulk_sku[linked_lc.bulk_sku_id] = linked_lc
 
     # Fill in any bulk SKUs not yet covered by the explicit link
@@ -1294,12 +1394,12 @@ def get_cost_summary(
                 .first()
             )
             if lc:
-                cpk_by_bulk_sku[b.bulk_sku_id] = lc.cost_per_kg or 0.0
+                cpk_by_bulk_sku[b.bulk_sku_id] = _lc_cpk_base(lc)
                 lc_info_by_bulk_sku[b.bulk_sku_id] = lc
             else:
                 cpk_by_bulk_sku[b.bulk_sku_id] = 0.0
 
-    # For backward-compat / single-value display, use first bulk entry's cost_per_kg
+    # For backward-compat / single-value display, use first bulk entry's cost_per_kg (base currency)
     first_bulk_sku_id = bulk_entries[0].bulk_sku_id if bulk_entries else None
     cost_per_kg = cpk_by_bulk_sku.get(first_bulk_sku_id, 0.0) if first_bulk_sku_id else 0.0
     first_lc = lc_info_by_bulk_sku.get(first_bulk_sku_id) if first_bulk_sku_id else None
@@ -1369,17 +1469,21 @@ def get_cost_summary(
         "bulk_sku_name":        _sku_name(db, first_bulk_sku_id) if first_bulk_sku_id else None,
         "bulk_entries": [
             {
-                "bulk_sku_id":   b.bulk_sku_id,
-                "bulk_sku_name": _sku_name(db, b.bulk_sku_id),
-                "cost_per_kg":   cpk_by_bulk_sku.get(b.bulk_sku_id, 0.0),
-                "actual_used":   b.actual_used,
+                "bulk_sku_id":    b.bulk_sku_id,
+                "bulk_sku_name":  _sku_name(db, b.bulk_sku_id),
+                "cost_per_kg":    cpk_by_bulk_sku.get(b.bulk_sku_id, 0.0),
+                "actual_used":    b.actual_used,
+                "currency":       lc_info_by_bulk_sku[b.bulk_sku_id].currency if b.bulk_sku_id in lc_info_by_bulk_sku else "USD",
+                "exchange_rate":  getattr(lc_info_by_bulk_sku.get(b.bulk_sku_id), "exchange_rate", 1.0) or 1.0,
             }
             for b in bulk_entries
         ],
         # Landed cost info (primary / first bulk entry, for backward-compat)
         "landed_cost_id":       first_lc.id if first_lc else None,
         "landed_cost_ref":      first_lc.batch_ref if first_lc else None,
-        "cost_per_kg":          cost_per_kg,
+        "landed_cost_currency": first_lc.currency if first_lc else "USD",
+        "landed_cost_exchange_rate": (getattr(first_lc, "exchange_rate", 1.0) or 1.0) if first_lc else 1.0,
+        "cost_per_kg":          cost_per_kg,  # already in base currency
         "total_theoretical_kg": round(total_theoretical_kg, 4),
         "bulk_material_cost":   round(bulk_material_cost, 4),
         # Packing costs

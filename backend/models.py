@@ -1098,6 +1098,7 @@ class LandedCostBatch(Base):
     shared_other     = Column(Float, default=0.0)           # misc shared costs
     notes            = Column(String, nullable=True)
     purchase_date    = Column(Date, nullable=True)              # date goods were purchased / invoiced
+    exchange_rate    = Column(Float, default=1.0)               # FX rate: 1 unit of currency → base currency (e.g. 1 INR = 0.012 USD → enter 0.012)
     created_at       = Column(DateTime, default=datetime.utcnow)
 
 
@@ -1117,8 +1118,9 @@ class LandedCost(Base):
     cost_labor            = Column(Float, default=0.0)      # per-SKU packing labor
     cost_overhead         = Column(Float, default=0.0)      # allocated share of overhead
     cost_other            = Column(Float, default=0.0)      # allocated share of other
-    total_cost            = Column(Float, nullable=True)    # auto-sum of all costs
-    cost_per_kg           = Column(Float, nullable=True)    # total_cost / qty_kg
+    total_cost            = Column(Float, nullable=True)    # auto-sum of all costs (in entered currency)
+    cost_per_kg           = Column(Float, nullable=True)    # total_cost / qty_kg (in entered currency)
+    exchange_rate         = Column(Float, default=1.0)      # copied from batch; multiply cost_per_kg to get base-currency rate
     currency              = Column(String(10), default="USD")
     notes                 = Column(String, nullable=True)
     created_at            = Column(DateTime, default=datetime.utcnow)
