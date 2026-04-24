@@ -86,6 +86,7 @@ class PurchaseBatchIn(BaseModel):
     batch_ref:       Optional[str]  = None
     supplier:        Optional[str]  = None
     currency:        str            = "USD"
+    purchase_date:   Optional[date] = None   # date goods were purchased / invoiced
     shared_freight:  float          = 0.0
     shared_duty:     float          = 0.0
     shared_overhead: float          = 0.0
@@ -315,13 +316,14 @@ def list_runs(
         db.query(PackingRun)
         .filter(PackingRun.company_id == company_id)
         .order_by(PackingRun.created_at.desc())
-        .limit(50)
+        .limit(200)
         .all()
     )
     result = []
     for run in runs:
-        # Get first bulk entry for summary display
-        bulk = db.query(PackingRunBulk).filter(PackingRunBulk.run_id == run.id).first()
+        # Get ALL bulk entries for summary display (not just the first)
+        bulks = db.query(PackingRunBulk).filter(PackingRunBulk.run_id == run.id).all()
+        bulk_sku_names = [_sku_name(db, b.bulk_sku_id) for b in bulks]
         result.append({
             "id":                run.id,
             "run_ref":           run.run_ref,
@@ -335,7 +337,9 @@ def list_runs(
             "variance_kg":       run.variance_kg,
             "variance_pct":      run.variance_pct,
             "flag_high_variance": run.flag_high_variance,
-            "bulk_sku_name":     _sku_name(db, bulk.bulk_sku_id) if bulk else None,
+            # Legacy single-name field (keep for backward-compat) + new multi-name list
+            "bulk_sku_name":     bulk_sku_names[0] if bulk_sku_names else None,
+            "bulk_sku_names":    bulk_sku_names,
         })
     return result
 
@@ -500,8 +504,10 @@ def close_run(
     bulk_entries = db.query(PackingRunBulk).filter(PackingRunBulk.run_id == run_id).all()
 
     # Step 1: compute theoretical_kg for each output via BOM
+    # Also build per-input-SKU theoretical to correctly attribute variance to each bulk entry
     total_theoretical = 0.0
     max_waste_pct = 0.0
+    theoretical_by_input_sku: dict = {}   # input_sku_id → total theoretical kg consumed
     for out in outputs:
         bom = db.query(BillOfMaterial).filter(
             BillOfMaterial.company_id == company_id,
@@ -512,11 +518,15 @@ def close_run(
             total_theoretical += out.theoretical_kg
             if bom.waste_pct_allowed > max_waste_pct:
                 max_waste_pct = bom.waste_pct_allowed
+            theoretical_by_input_sku[bom.input_sku_id] = (
+                theoretical_by_input_sku.get(bom.input_sku_id, 0.0) + out.theoretical_kg
+            )
         else:
             # No BOM found — use 0 contribution, log a note
             out.theoretical_kg = 0.0
 
     # Step 2: update bulk entries with actual usage
+    # For multi-bulk runs, each bulk entry gets its own theoretical based on its BOM input SKU
     total_actual = 0.0
     for b in bulk_entries:
         qty_end = qty_end_by_sku.get(b.bulk_sku_id)
@@ -527,8 +537,13 @@ def close_run(
             # If not provided, keep existing or default to 0
             b.actual_used = b.qty_start - (b.qty_end or 0.0)
 
-        b.theoretical = total_theoretical  # share theoretical across bulk entries (single-bulk typical case)
-        b.variance = (b.actual_used or 0.0) - b.theoretical if b.theoretical else None
+        # Attribute theoretical to this bulk entry by matching its SKU to BOM input_sku_id
+        # Fall back to evenly-split share if no BOM maps directly to this bulk SKU
+        b.theoretical = theoretical_by_input_sku.get(
+            b.bulk_sku_id,
+            total_theoretical / len(bulk_entries) if bulk_entries else 0.0,
+        )
+        b.variance = (b.actual_used or 0.0) - b.theoretical if b.theoretical is not None else None
         if b.theoretical and b.theoretical > 0:
             b.variance_pct = ((b.actual_used or 0.0) - b.theoretical) / b.theoretical * 100
         else:
@@ -550,6 +565,50 @@ def close_run(
 
     run.status    = "closed"
     run.closed_at = datetime.utcnow()
+
+    db.commit()
+    db.refresh(run)
+    return _fmt_run(run, db)
+
+
+@router.post("/runs/{run_id}/reopen")
+def reopen_run(
+    run_id:     int,
+    db:         Session = Depends(get_db),
+    company_id: int     = Depends(get_company_id),
+):
+    """Re-open a closed packing run so additional outputs or bulk adjustments can be made."""
+    run = db.query(PackingRun).filter(
+        PackingRun.id == run_id,
+        PackingRun.company_id == company_id,
+    ).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if run.status == "open":
+        raise HTTPException(status_code=400, detail="Run is already open")
+
+    # Clear closure stats — they'll be recalculated on next close
+    run.status             = "open"
+    run.closed_at          = None
+    run.theoretical_kg     = None
+    run.actual_kg          = None
+    run.variance_kg        = None
+    run.variance_pct       = None
+    run.flag_high_variance = False
+
+    # Clear per-bulk-entry variance stats too
+    bulk_entries = db.query(PackingRunBulk).filter(PackingRunBulk.run_id == run_id).all()
+    for b in bulk_entries:
+        b.qty_end      = None
+        b.actual_used  = None
+        b.theoretical  = None
+        b.variance     = None
+        b.variance_pct = None
+
+    # Clear per-output theoretical_kg
+    outputs = db.query(PackingRunOutput).filter(PackingRunOutput.run_id == run_id).all()
+    for o in outputs:
+        o.theoretical_kg = None
 
     db.commit()
     db.refresh(run)
@@ -605,6 +664,17 @@ def get_summary(
             sku_breakdown[key]["total_theoretical"]   += (b.theoretical or 0.0)
             sku_breakdown[key]["total_variance"]      += (b.variance or 0.0)
 
+    # Pre-fetch all bulk entries for closed runs in one query (avoids N+1)
+    closed_run_ids = [r.id for r in closed_runs]
+    all_bulk_entries = (
+        db.query(PackingRunBulk)
+        .filter(PackingRunBulk.run_id.in_(closed_run_ids))
+        .all()
+    ) if closed_run_ids else []
+    bulk_names_by_run: dict = {}
+    for b in all_bulk_entries:
+        bulk_names_by_run.setdefault(b.run_id, []).append(_sku_name(db, b.bulk_sku_id))
+
     # Sorted closed runs by worst variance first
     worst_runs = sorted(
         [
@@ -617,6 +687,7 @@ def get_summary(
                 "variance_kg":   r.variance_kg,
                 "variance_pct":  r.variance_pct,
                 "flag_high_variance": r.flag_high_variance,
+                "bulk_sku_names": bulk_names_by_run.get(r.id, []),
             }
             for r in closed_runs
         ],
@@ -643,16 +714,37 @@ def _allocate_and_save_lines(
     batch: LandedCostBatch,
     lines: List[PurchaseLineIn],
     company_id: int,
-    existing_lcs: list = None,   # pass to update in-place instead of inserting
 ):
     """
-    For each line, compute its proportional share of the batch's shared costs,
-    create (or update) LandedCost rows, and return the list.
+    Upsert LandedCost rows for the batch lines:
+    - Match existing records by bulk_sku_id to preserve IDs (so packing run
+      landed_cost_id FKs remain valid after an edit).
+    - Delete any LandedCost rows whose SKU is no longer in the new lines, and
+      nullify the landed_cost_id on any PackingRun that pointed to them.
+    - Create new rows for SKUs that are newly added.
+    Returns the list of saved LandedCost objects.
     """
+    from models import PackingRun  # avoid circular import at module level
     total_kg = sum(l.qty_kg for l in lines) or 1.0
-    shared_total = batch.shared_freight + batch.shared_duty + batch.shared_overhead + batch.shared_other
+    new_sku_ids = {l.bulk_sku_id for l in lines}
+
+    # Fetch existing LandedCost rows for this batch keyed by bulk_sku_id
+    existing: dict = {
+        lc.bulk_sku_id: lc
+        for lc in db.query(LandedCost).filter(LandedCost.purchase_batch_id == batch.id).all()
+    }
+
+    # Remove records whose SKU is no longer in the new lines; nullify run FKs
+    for sku_id, lc in list(existing.items()):
+        if sku_id not in new_sku_ids:
+            # Nullify any packing runs that were linked to this specific LandedCost
+            db.query(PackingRun).filter(PackingRun.landed_cost_id == lc.id).update(
+                {"landed_cost_id": None}, synchronize_session=False
+            )
+            db.delete(lc)
+
     results = []
-    for i, line in enumerate(lines):
+    for line in lines:
         weight_share = line.qty_kg / total_kg
         alloc_freight  = round(batch.shared_freight  * weight_share, 4)
         alloc_duty     = round(batch.shared_duty     * weight_share, 4)
@@ -670,12 +762,12 @@ def _allocate_and_save_lines(
         }
         totals = _compute_landed_totals({**per_sku_costs, "qty_kg": line.qty_kg})
 
-        if existing_lcs and i < len(existing_lcs):
-            lc = existing_lcs[i]
-            lc.bulk_sku_id      = line.bulk_sku_id
-            lc.qty_kg           = line.qty_kg
-            lc.batch_ref        = batch.batch_ref
-            lc.currency         = batch.currency
+        if line.bulk_sku_id in existing:
+            # Update in-place — preserves the ID
+            lc = existing[line.bulk_sku_id]
+            lc.qty_kg    = line.qty_kg
+            lc.batch_ref = batch.batch_ref
+            lc.currency  = batch.currency
         else:
             lc = LandedCost(
                 company_id        = company_id,
@@ -705,6 +797,7 @@ def _fmt_batch(batch: LandedCostBatch, db: Session) -> dict:
         "batch_ref":      batch.batch_ref,
         "supplier":       batch.supplier,
         "currency":       batch.currency,
+        "purchase_date":  batch.purchase_date.isoformat() if getattr(batch, "purchase_date", None) else None,
         "shared_freight": batch.shared_freight,
         "shared_duty":    batch.shared_duty,
         "shared_overhead": batch.shared_overhead,
@@ -881,15 +974,21 @@ def create_purchase(
 ):
     if not body.lines:
         raise HTTPException(status_code=400, detail="A purchase must have at least one product line.")
+    # Validate SKUs and detect duplicates
+    seen_skus: set = set()
     for line in body.lines:
         if not db.query(SKU).filter(SKU.id == line.bulk_sku_id).first():
             raise HTTPException(status_code=404, detail=f"SKU {line.bulk_sku_id} not found")
+        if line.bulk_sku_id in seen_skus:
+            raise HTTPException(status_code=400, detail=f"Duplicate SKU {line.bulk_sku_id} in the same purchase batch.")
+        seen_skus.add(line.bulk_sku_id)
 
     batch = LandedCostBatch(
         company_id      = company_id,
         batch_ref       = body.batch_ref,
         supplier        = body.supplier,
         currency        = body.currency,
+        purchase_date   = body.purchase_date,
         shared_freight  = body.shared_freight,
         shared_duty     = body.shared_duty,
         shared_overhead = body.shared_overhead,
@@ -935,21 +1034,27 @@ def update_purchase(
         raise HTTPException(status_code=404, detail="Purchase not found")
     if not body.lines:
         raise HTTPException(status_code=400, detail="A purchase must have at least one product line.")
+    # Validate SKUs and detect duplicates
+    seen_skus: set = set()
+    for line in body.lines:
+        if not db.query(SKU).filter(SKU.id == line.bulk_sku_id).first():
+            raise HTTPException(status_code=404, detail=f"SKU {line.bulk_sku_id} not found")
+        if line.bulk_sku_id in seen_skus:
+            raise HTTPException(status_code=400, detail=f"Duplicate SKU {line.bulk_sku_id} in the same purchase batch.")
+        seen_skus.add(line.bulk_sku_id)
 
     # Update header
     batch.batch_ref       = body.batch_ref
     batch.supplier        = body.supplier
     batch.currency        = body.currency
+    batch.purchase_date   = body.purchase_date
     batch.shared_freight  = body.shared_freight
     batch.shared_duty     = body.shared_duty
     batch.shared_overhead = body.shared_overhead
     batch.shared_other    = body.shared_other
     batch.notes           = body.notes
 
-    # Delete old lines and recreate
-    db.query(LandedCost).filter(LandedCost.purchase_batch_id == batch_id).delete()
-    db.flush()
-
+    # Upsert lines in-place (preserves LandedCost IDs → run FK links stay valid)
     _allocate_and_save_lines(db, batch, body.lines, company_id)
     db.commit()
     db.refresh(batch)
@@ -1156,27 +1261,48 @@ def get_cost_summary(
     outputs = db.query(PackingRunOutput).filter(PackingRunOutput.run_id == run_id).all()
     bulk_entries = db.query(PackingRunBulk).filter(PackingRunBulk.run_id == run_id).all()
 
-    # Determine the bulk SKU used in this run (first bulk entry)
-    bulk_sku_id = bulk_entries[0].bulk_sku_id if bulk_entries else None
-
-    # Prefer the run's explicitly linked LandedCost; fall back to most-recent for bulk SKU
-    landed_cost = None
+    # For multi-bulk runs, build a cost_per_kg lookup per input SKU.
+    # Strategy:
+    #   1. If the run has an explicitly linked landed_cost_id, use that for the primary bulk SKU.
+    #   2. For each bulk entry, look for the most-recent LandedCost record for that SKU.
     run_lc_id = getattr(run, 'landed_cost_id', None)
+
+    # Map: bulk_sku_id → cost_per_kg
+    cpk_by_bulk_sku: dict = {}
+    lc_info_by_bulk_sku: dict = {}  # for display metadata
+
     if run_lc_id is not None:
-        landed_cost = db.query(LandedCost).filter(
+        # Explicit link — fetch the linked LandedCost and use it for its own SKU
+        linked_lc = db.query(LandedCost).filter(
             LandedCost.id == run_lc_id,
             LandedCost.company_id == company_id,
         ).first()
-    if landed_cost is None and bulk_sku_id is not None:
-        landed_cost = (
-            db.query(LandedCost)
-            .filter(
-                LandedCost.company_id == company_id,
-                LandedCost.bulk_sku_id == bulk_sku_id,
+        if linked_lc:
+            cpk_by_bulk_sku[linked_lc.bulk_sku_id] = linked_lc.cost_per_kg or 0.0
+            lc_info_by_bulk_sku[linked_lc.bulk_sku_id] = linked_lc
+
+    # Fill in any bulk SKUs not yet covered by the explicit link
+    for b in bulk_entries:
+        if b.bulk_sku_id not in cpk_by_bulk_sku:
+            lc = (
+                db.query(LandedCost)
+                .filter(
+                    LandedCost.company_id == company_id,
+                    LandedCost.bulk_sku_id == b.bulk_sku_id,
+                )
+                .order_by(LandedCost.created_at.desc())
+                .first()
             )
-            .order_by(LandedCost.created_at.desc())
-            .first()
-        )
+            if lc:
+                cpk_by_bulk_sku[b.bulk_sku_id] = lc.cost_per_kg or 0.0
+                lc_info_by_bulk_sku[b.bulk_sku_id] = lc
+            else:
+                cpk_by_bulk_sku[b.bulk_sku_id] = 0.0
+
+    # For backward-compat / single-value display, use first bulk entry's cost_per_kg
+    first_bulk_sku_id = bulk_entries[0].bulk_sku_id if bulk_entries else None
+    cost_per_kg = cpk_by_bulk_sku.get(first_bulk_sku_id, 0.0) if first_bulk_sku_id else 0.0
+    first_lc = lc_info_by_bulk_sku.get(first_bulk_sku_id) if first_bulk_sku_id else None
 
     # Get PackingRunCost for this run
     run_cost = db.query(PackingRunCost).filter(PackingRunCost.run_id == run_id).first()
@@ -1185,8 +1311,6 @@ def get_cost_summary(
     total_cases = sum(o.qty_packed for o in outputs)
     total_theoretical_kg = 0.0
     per_output = []
-
-    cost_per_kg = landed_cost.cost_per_kg if (landed_cost and landed_cost.cost_per_kg) else 0.0
 
     # Packing run costs
     packing_pkg   = run_cost.cost_packaging_mat if run_cost else 0.0
@@ -1208,7 +1332,11 @@ def get_cost_summary(
         if kg_used is not None:
             total_theoretical_kg += kg_used
 
-        material_per_case = (bom_qty * cost_per_kg) if (bom_qty is not None and cost_per_kg) else 0.0
+        # Use the cost_per_kg for the BOM's input SKU (multi-bulk aware)
+        input_sku_id = bom.input_sku_id if bom else None
+        effective_cpk = cpk_by_bulk_sku.get(input_sku_id, cost_per_kg) if input_sku_id else cost_per_kg
+
+        material_per_case = (bom_qty * effective_cpk) if (bom_qty is not None and effective_cpk) else 0.0
         total_per_case    = material_per_case + packing_cost_per_case
 
         per_output.append({
@@ -1225,7 +1353,11 @@ def get_cost_summary(
             "subtotal_total":    round(out.qty_packed * total_per_case, 4),
         })
 
-    bulk_material_cost = total_theoretical_kg * cost_per_kg
+    # Bulk material cost = sum across ALL bulk entries using their own cost_per_kg
+    bulk_material_cost = sum(
+        (b.actual_used or 0.0) * cpk_by_bulk_sku.get(b.bulk_sku_id, 0.0)
+        for b in bulk_entries
+    ) if bulk_entries else (total_theoretical_kg * cost_per_kg)
     grand_total_cost   = bulk_material_cost + packing_total
     grand_total_per_case_avg = (grand_total_cost / total_cases) if total_cases > 0 else 0.0
 
@@ -1233,11 +1365,20 @@ def get_cost_summary(
         "run_id":               run_id,
         "run_ref":              run.run_ref,
         "status":               run.status,
-        "bulk_sku_id":          bulk_sku_id,
-        "bulk_sku_name":        _sku_name(db, bulk_sku_id) if bulk_sku_id else None,
-        # Landed cost info
-        "landed_cost_id":       landed_cost.id if landed_cost else None,
-        "landed_cost_ref":      landed_cost.batch_ref if landed_cost else None,
+        "bulk_sku_id":          first_bulk_sku_id,
+        "bulk_sku_name":        _sku_name(db, first_bulk_sku_id) if first_bulk_sku_id else None,
+        "bulk_entries": [
+            {
+                "bulk_sku_id":   b.bulk_sku_id,
+                "bulk_sku_name": _sku_name(db, b.bulk_sku_id),
+                "cost_per_kg":   cpk_by_bulk_sku.get(b.bulk_sku_id, 0.0),
+                "actual_used":   b.actual_used,
+            }
+            for b in bulk_entries
+        ],
+        # Landed cost info (primary / first bulk entry, for backward-compat)
+        "landed_cost_id":       first_lc.id if first_lc else None,
+        "landed_cost_ref":      first_lc.batch_ref if first_lc else None,
         "cost_per_kg":          cost_per_kg,
         "total_theoretical_kg": round(total_theoretical_kg, 4),
         "bulk_material_cost":   round(bulk_material_cost, 4),

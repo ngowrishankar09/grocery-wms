@@ -4,7 +4,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship, declarative_base
 from sqlalchemy import create_engine
-from datetime import datetime
+from datetime import datetime, date
 import enum
 
 Base = declarative_base()
@@ -1097,6 +1097,7 @@ class LandedCostBatch(Base):
     shared_overhead  = Column(Float, default=0.0)           # rent, electricity allocation
     shared_other     = Column(Float, default=0.0)           # misc shared costs
     notes            = Column(String, nullable=True)
+    purchase_date    = Column(Date, nullable=True)              # date goods were purchased / invoiced
     created_at       = Column(DateTime, default=datetime.utcnow)
 
 

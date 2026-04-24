@@ -479,6 +479,7 @@ export const repackingAPI = {
   addBulk:     (id, data) => api.post(`/repacking/runs/${id}/bulk`, data),
   removeBulk:  (id, skuId)=> api.delete(`/repacking/runs/${id}/bulk/${skuId}`),
   closeRun:    (id, data) => api.post(`/repacking/runs/${id}/close`, data),
+  reopenRun:   (id)       => api.post(`/repacking/runs/${id}/reopen`),
   summary:     (params)   => api.get('/repacking/summary', { params }),
   // Individual landed costs (legacy / single-SKU)
   listLandedCosts:  ()         => api.get('/repacking/landed-costs'),

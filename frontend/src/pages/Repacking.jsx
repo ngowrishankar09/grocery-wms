@@ -88,6 +88,58 @@ function SetupGuide() {
   )
 }
 
+// ── Searchable SKU input ──────────────────────────────────────
+function SKUSearch({ skus, value, onChange, placeholder = 'Search SKU…', required = false }) {
+  const [query, setQuery]   = useState('')
+  const [focused, setFocused] = useState(false)
+  const selected = skus.find(s => String(s.id) === String(value))
+  const displayValue = focused
+    ? query
+    : (selected ? `${selected.product_name} (${selected.sku_code})` : '')
+  const filtered = (query.trim()
+    ? skus.filter(s =>
+        s.product_name.toLowerCase().includes(query.toLowerCase()) ||
+        s.sku_code.toLowerCase().includes(query.toLowerCase())
+      )
+    : skus
+  ).slice(0, 12)
+  const handleSelect = (sku) => {
+    onChange(String(sku.id)); setQuery(''); setFocused(false)
+  }
+  return (
+    <div className="relative">
+      <input
+        type="text"
+        className="input w-full text-sm"
+        placeholder={placeholder}
+        value={displayValue}
+        required={required && !value}
+        onChange={e => { setQuery(e.target.value); setFocused(true) }}
+        onFocus={() => { setFocused(true); setQuery('') }}
+        onBlur={() => setTimeout(() => setFocused(false), 180)}
+        autoComplete="off"
+      />
+      {focused && (
+        <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-xl max-h-48 overflow-y-auto">
+          {filtered.length === 0 ? (
+            <div className="px-3 py-2.5 text-xs text-gray-400 italic">No matching SKUs found</div>
+          ) : filtered.map(s => (
+            <button
+              key={s.id}
+              type="button"
+              className="w-full text-left px-3 py-2 text-sm hover:bg-blue-50 transition-colors border-b border-gray-50 last:border-0"
+              onMouseDown={() => handleSelect(s)}
+            >
+              <span className="font-medium text-gray-800">{s.product_name}</span>
+              <span className="ml-2 text-xs text-gray-400 font-mono">{s.sku_code}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Tab 1: Bills of Materials ─────────────────────────────────
 function BOMTab({ skus }) {
   const [boms, setBoms]         = useState([])
@@ -303,7 +355,7 @@ function PurchasesTab({ skus }) {
 
   const emptyLine = () => ({ bulk_sku_id: '', qty_kg: '', cost_material: '', cost_packaging_mat: '', cost_labor: '' })
   const emptyForm = () => ({
-    batch_ref: '', supplier: '', currency: 'USD',
+    batch_ref: '', supplier: '', currency: 'USD', purchase_date: '',
     shared_freight: '', shared_duty: '', shared_overhead: '', shared_other: '',
     notes: '',
     lines: [emptyLine()],
@@ -365,6 +417,7 @@ function PurchasesTab({ skus }) {
         batch_ref:       d.batch_ref      || '',
         supplier:        d.supplier       || '',
         currency:        d.currency       || 'USD',
+        purchase_date:   d.purchase_date  || '',
         shared_freight:  String(d.shared_freight  ?? 0),
         shared_duty:     String(d.shared_duty     ?? 0),
         shared_overhead: String(d.shared_overhead ?? 0),
@@ -390,9 +443,10 @@ function PurchasesTab({ skus }) {
       setFormError('Please add at least one SKU line with a quantity.'); return
     }
     const payload = {
-      batch_ref:       form.batch_ref  || null,
-      supplier:        form.supplier   || null,
+      batch_ref:       form.batch_ref     || null,
+      supplier:        form.supplier      || null,
       currency:        form.currency,
+      purchase_date:   form.purchase_date || null,
       shared_freight:  parseFloat(form.shared_freight)  || 0,
       shared_duty:     parseFloat(form.shared_duty)     || 0,
       shared_overhead: parseFloat(form.shared_overhead) || 0,
@@ -457,7 +511,7 @@ function PurchasesTab({ skus }) {
             {/* ── Shipment header ─────────────────────────────── */}
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Shipment Details</p>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">Batch Reference</label>
                   <input type="text" className="input w-full" placeholder="e.g. India Apr 2026" value={form.batch_ref} onChange={e => setForm(f => ({ ...f, batch_ref: e.target.value }))} />
@@ -465,6 +519,10 @@ function PurchasesTab({ skus }) {
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">Supplier</label>
                   <input type="text" className="input w-full" placeholder="e.g. Spice Traders Ltd" value={form.supplier} onChange={e => setForm(f => ({ ...f, supplier: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Purchase Date</label>
+                  <input type="date" className="input w-full" value={form.purchase_date} onChange={e => setForm(f => ({ ...f, purchase_date: e.target.value }))} />
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">Currency</label>
@@ -533,11 +591,13 @@ function PurchasesTab({ skus }) {
                       <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-2">
                         <div className="md:col-span-2">
                           <label className="block text-xs font-medium text-gray-700 mb-1">Bulk SKU <span className="text-red-500">*</span></label>
-                          <select className="input w-full text-sm" value={line.bulk_sku_id}
-                            onChange={e => updateLine(i, 'bulk_sku_id', e.target.value)} required>
-                            <option value="">Select bulk SKU…</option>
-                            {skus.map(s => <option key={s.id} value={s.id}>{s.product_name} ({s.sku_code})</option>)}
-                          </select>
+                          <SKUSearch
+                            skus={skus}
+                            value={line.bulk_sku_id}
+                            onChange={val => updateLine(i, 'bulk_sku_id', val)}
+                            placeholder="Search or type SKU name…"
+                            required
+                          />
                         </div>
                         <div>
                           <label className="block text-xs font-medium text-gray-700 mb-1">Qty (kg) <span className="text-red-500">*</span></label>
@@ -627,7 +687,10 @@ function PurchasesTab({ skus }) {
                       <span className="text-xs px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded font-mono">{purchase.currency}</span>
                     </div>
                     <div className="text-xs text-gray-400 mt-0.5">
-                      {purchase.created_at ? new Date(purchase.created_at).toLocaleDateString() : '—'}
+                      {purchase.purchase_date
+                        ? <span className="text-gray-600 font-medium">Purchased: {new Date(purchase.purchase_date + 'T00:00:00').toLocaleDateString()}</span>
+                        : purchase.created_at ? new Date(purchase.created_at).toLocaleDateString() : '—'
+                      }
                       {' · '}{purchase.items?.length ?? 0} SKU{(purchase.items?.length ?? 0) !== 1 ? 's' : ''}
                       {purchase.total_kg > 0 && ` · ${(+purchase.total_kg).toFixed(0)} kg total`}
                     </div>
@@ -853,11 +916,11 @@ function OperationalCostsCard({ runDetail, onSaved }) {
           </div>
         ) : loadingSummary ? (
           <div className="flex justify-center py-6"><Loader2 className="animate-spin text-blue-500" size={20} /></div>
-        ) : summary && summary.cost_per_kg === 0 ? (
+        ) : summary && summary.cost_per_kg === 0 && (summary.bulk_entries?.every(b => b.cost_per_kg === 0) ?? true) ? (
           <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-start gap-2 text-sm text-amber-800">
             <AlertTriangle size={15} className="mt-0.5 shrink-0" />
             <span>
-              No landed cost recorded for <strong>{summary.bulk_sku_name || 'this bulk SKU'}</strong> — add one in the <strong>Landed Costs</strong> tab to see full cost breakdown.
+              No landed cost found for <strong>{summary.bulk_sku_name || 'the bulk materials in this run'}</strong> — record a purchase in the <strong>Purchases</strong> tab first, then the cost breakdown will appear here.
             </span>
           </div>
         ) : summary ? (
@@ -1070,6 +1133,16 @@ function RunsTab({ skus, landedCosts }) {
     } finally { setAddingBulk(false) }
   }
 
+  const handleReopenRun = async () => {
+    if (!window.confirm('Reopen this run? Variance stats will be cleared and recalculated on next close.')) return
+    try {
+      const res = await repackingAPI.reopenRun(runDetail.id)
+      setRunDetail(res.data)
+      setShowClose(false)
+      loadRuns()
+    } catch (e) { alert(e.response?.data?.detail || 'Failed to reopen run') }
+  }
+
   const handleCloseRun = async (e) => {
     e.preventDefault(); setCloseError(null)
     const bulkEntries = runDetail.bulk_entries.map(b => ({
@@ -1113,7 +1186,7 @@ function RunsTab({ skus, landedCosts }) {
             <div className="card">
               <div className="flex items-start justify-between">
                 <div>
-                  <div className="flex items-center gap-2 mb-1">
+                  <div className="flex items-center gap-2 mb-1 flex-wrap">
                     <StatusBadge status={runDetail.status} />
                     {runDetail.flag_high_variance && (
                       <span className="flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full bg-red-100 text-red-700">
@@ -1124,6 +1197,15 @@ function RunsTab({ skus, landedCosts }) {
                       <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-green-100 text-green-700">
                         📦 Batch: {runDetail.linked_batch_ref}
                       </span>
+                    )}
+                    {runDetail.status === 'closed' && (
+                      <button
+                        onClick={handleReopenRun}
+                        className="text-xs font-medium px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 hover:bg-amber-200 transition-colors"
+                        title="Re-open this run to add more outputs or adjust bulk weights"
+                      >
+                        ↩ Reopen Run
+                      </button>
                     )}
                   </div>
                   <h2 className="text-lg font-bold text-gray-800">{runDetail.run_ref || `Run #${runDetail.id}`}</h2>
@@ -1538,7 +1620,7 @@ function RunsTab({ skus, landedCosts }) {
                     <option value="">Use most recent batch automatically</option>
                     {matchingLandedCosts.map(lc => (
                       <option key={lc.id} value={lc.id}>
-                        {lc.batch_ref || `Batch #${lc.id}`} — ${(+lc.cost_per_kg).toFixed(4)}/kg ({(+lc.qty_kg).toFixed(0)} kg, {new Date(lc.created_at).toLocaleDateString()})
+                        {lc.batch_ref || `LC #${lc.id}`} · {lc.bulk_sku_name} — ${(+lc.cost_per_kg).toFixed(4)}/kg · {(+lc.qty_kg).toFixed(0)} kg · {new Date(lc.created_at).toLocaleDateString()}
                       </option>
                     ))}
                   </select>
@@ -1594,7 +1676,11 @@ function RunsTab({ skus, landedCosts }) {
                     <div className="font-medium text-gray-800">{r.run_ref || `Run #${r.id}`}</div>
                     {r.started_by && <div className="text-xs text-gray-400">{r.started_by}</div>}
                   </td>
-                  <td className="px-4 py-3 text-gray-600">{r.bulk_sku_name || '—'}</td>
+                  <td className="px-4 py-3 text-gray-600">
+                    {r.bulk_sku_names?.length > 0
+                      ? r.bulk_sku_names.join(' + ')
+                      : (r.bulk_sku_name || '—')}
+                  </td>
                   <td className="px-4 py-3 text-gray-500 text-xs">{r.created_at ? new Date(r.created_at).toLocaleDateString() : '—'}</td>
                   <td className="px-4 py-3"><StatusBadge status={r.status} /></td>
                   <td className="px-4 py-3 text-right"><VarianceBadge pct={r.variance_pct} /></td>
@@ -1807,6 +1893,7 @@ function SummaryTab() {
                   <thead className="bg-gray-50 text-xs text-gray-500 uppercase tracking-wide">
                     <tr>
                       <th className="px-4 py-3 text-left">Run</th>
+                      <th className="px-4 py-3 text-left">Bulk Material</th>
                       <th className="px-4 py-3 text-left">Closed</th>
                       <th className="px-4 py-3 text-right">Theoretical kg</th>
                       <th className="px-4 py-3 text-right">Actual kg</th>
@@ -1819,6 +1906,9 @@ function SummaryTab() {
                     {summary.worst_runs.map(r => (
                       <tr key={r.id} className={r.flag_high_variance ? 'bg-red-50' : ''}>
                         <td className="px-4 py-3 font-medium text-gray-800">{r.run_ref || `Run #${r.id}`}</td>
+                        <td className="px-4 py-3 text-gray-500 text-xs">
+                          {r.bulk_sku_names?.length > 0 ? r.bulk_sku_names.join(' + ') : '—'}
+                        </td>
                         <td className="px-4 py-3 text-gray-500 text-xs">{r.closed_at ? new Date(r.closed_at).toLocaleDateString() : '—'}</td>
                         <td className="px-4 py-3 text-right font-mono">{(r.theoretical_kg ?? 0).toFixed(3)}</td>
                         <td className="px-4 py-3 text-right font-mono">{(r.actual_kg ?? 0).toFixed(3)}</td>
