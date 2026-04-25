@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { repackingAPI, skuAPI } from '../api/client'
 import {
   Loader2, Plus, Trash2, Package, ChevronLeft, AlertTriangle,
@@ -53,9 +53,9 @@ function StatusBadge({ status }) {
 function WorkflowGuide({ activeTab, onTabChange }) {
   const steps = [
     {
-      n: 1, emoji: '⚙️', label: 'Conversion Rates', tabIdx: 0,
-      sub: 'How many kg of bulk makes one retail case?',
-      tip: 'Example: 20 × 200g sachets = 4.0 kg/case. Set this once per product.',
+      n: 1, emoji: '⚙️', label: 'Bill of Materials', tabIdx: 0,
+      sub: 'What retail packs can you produce from each bulk material?',
+      tip: 'Example: 100 kg chilli powder bulk → 400g × 20/case (8 kg/case) OR 800g × 12/case. Set once per product.',
     },
     {
       n: 2, emoji: '📦', label: 'Record Purchase', tabIdx: 1,
@@ -225,24 +225,27 @@ function CostLineRow({ line, idx, onChange, onRemove, onFetchFx, fetchingFx }) {
   )
 }
 
-// ── Tab 1: Conversion Rates (Bills of Materials) ──────────────
+// ── Tab 1: Bill of Materials (Bulk → Retail yields) ───────────
 function BOMTab({ skus }) {
-  const [boms, setBoms]         = useState([])
-  const [loading, setLoading]   = useState(true)
-  const [error, setError]       = useState(null)
-  const [showForm, setShowForm] = useState(false)
+  const [boms, setBoms]           = useState([])
+  const [loading, setLoading]     = useState(true)
+  const [error, setError]         = useState(null)
+  const [showForm, setShowForm]   = useState(false)
   const [editBomId, setEditBomId] = useState(null)
-  const [form, setForm]         = useState({
-    output_sku_id: '', input_sku_id: '', qty_per_unit: '', unit: 'kg',
-    waste_pct_allowed: 2, notes: '',
-  })
-  const [saving, setSaving]     = useState(false)
+  const [saving, setSaving]       = useState(false)
   const [formError, setFormError] = useState(null)
 
-  const emptyForm = { output_sku_id: '', input_sku_id: '', qty_per_unit: '', unit: 'kg', waste_pct_allowed: 2, notes: '' }
+  // Form state — bulk-first order
+  const emptyForm = {
+    input_sku_id: '',    // bulk raw material (the big bag/sack you buy)
+    output_sku_id: '',   // retail pack you produce from it
+    qty_per_unit: '', unit: 'kg',
+    waste_pct_allowed: 2, notes: '',
+  }
+  const [form, setForm] = useState(emptyForm)
 
-  // Auto-calc qty_per_unit from SKU unit_weight when retail SKU is selected
-  const handleOutputSkuChange = (skuId) => {
+  // Auto-fill bulk consumption when retail SKU is selected (uses unit_weight on SKU master)
+  const handleRetailSkuChange = (skuId) => {
     setForm(f => {
       const sku = skus.find(s => String(s.id) === String(skuId))
       if (sku?.unit_weight && sku?.case_size) {
@@ -254,42 +257,48 @@ function BOMTab({ skus }) {
     })
   }
 
-  // Compute auto-calc preview for current form output SKU
-  const autoCalcPreview = (() => {
+  // Preview line shown under retail SKU dropdown
+  const autoCalcPreview = useMemo(() => {
     const sku = skus.find(s => String(s.id) === String(form.output_sku_id))
     if (!sku?.unit_weight || !sku?.case_size) return null
     const kgPerUnit = toKg(sku.unit_weight, sku.unit_weight_uom || 'g')
     const kgPerCase = kgPerUnit * sku.case_size
-    return {
-      units: sku.case_size, weight: sku.unit_weight, uom: sku.unit_weight_uom || 'g',
-      kgPerCase: kgPerCase.toFixed(4),
-    }
-  })()
+    return { units: sku.case_size, weight: sku.unit_weight, uom: sku.unit_weight_uom || 'g', kgPerCase: kgPerCase.toFixed(4) }
+  }, [form.output_sku_id, skus])
 
   const load = useCallback(async () => {
     setLoading(true); setError(null)
-    try {
-      const res = await repackingAPI.listBOM()
-      setBoms(res.data)
-    } catch (e) {
-      setError(e.response?.data?.detail || 'Failed to load bills of materials')
-    } finally { setLoading(false) }
+    try { const res = await repackingAPI.listBOM(); setBoms(res.data) }
+    catch (e) { setError(e.response?.data?.detail || 'Failed to load BOM') }
+    finally { setLoading(false) }
   }, [])
 
   useEffect(() => { load() }, [load])
 
-  const openNew = () => {
+  // Group BOMs by bulk (input) SKU for the display cards
+  const grouped = useMemo(() => {
+    const map = {}
+    boms.forEach(b => {
+      const key = b.input_sku_id
+      if (!map[key]) map[key] = { bulk_id: key, bulk_name: b.input_sku_name, bulk_code: b.input_sku_code, outputs: [] }
+      map[key].outputs.push(b)
+    })
+    return Object.values(map)
+  }, [boms])
+
+  const openNew = (prefillBulkId = '') => {
     setEditBomId(null)
-    setForm(emptyForm)
+    setForm({ ...emptyForm, input_sku_id: prefillBulkId ? String(prefillBulkId) : '' })
     setFormError(null)
     setShowForm(true)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
   const openEdit = (bom) => {
     setEditBomId(bom.id)
     setForm({
-      output_sku_id:     String(bom.output_sku_id),
       input_sku_id:      String(bom.input_sku_id),
+      output_sku_id:     String(bom.output_sku_id),
       qty_per_unit:      String(bom.qty_per_unit),
       unit:              bom.unit || 'kg',
       waste_pct_allowed: bom.waste_pct_allowed ?? 2,
@@ -306,7 +315,7 @@ function BOMTab({ skus }) {
       setFormError('Please fill all required fields.'); return
     }
     if (form.output_sku_id === form.input_sku_id) {
-      setFormError('Output and input SKU must be different.'); return
+      setFormError('The bulk material and the retail product must be different SKUs.'); return
     }
     const payload = {
       output_sku_id:     parseInt(form.output_sku_id),
@@ -318,147 +327,275 @@ function BOMTab({ skus }) {
     }
     setSaving(true)
     try {
-      if (editBomId) {
-        await repackingAPI.updateBOM(editBomId, payload)
-      } else {
-        await repackingAPI.createBOM(payload)
-      }
-      setShowForm(false)
-      setEditBomId(null)
-      setForm(emptyForm)
-      load()
-    } catch (e) {
-      setFormError(e.response?.data?.detail || 'Failed to save BOM')
-    } finally { setSaving(false) }
+      if (editBomId) await repackingAPI.updateBOM(editBomId, payload)
+      else           await repackingAPI.createBOM(payload)
+      setShowForm(false); setEditBomId(null); setForm(emptyForm); load()
+    } catch (e) { setFormError(e.response?.data?.detail || 'Failed to save') }
+    finally { setSaving(false) }
   }
 
   const handleDelete = async (id) => {
-    if (!window.confirm('Delete this conversion rate?')) return
+    if (!window.confirm('Remove this retail product from this bulk material?')) return
     try { await repackingAPI.deleteBOM(id); load() }
-    catch (e) { alert(e.response?.data?.detail || 'Failed to delete BOM') }
+    catch (e) { alert(e.response?.data?.detail || 'Failed to delete') }
   }
+
+  // Retail products already linked to the currently selected bulk (for duplicate warning)
+  const alreadyLinked = useMemo(() => {
+    if (!form.input_sku_id) return []
+    const grp = grouped.find(g => String(g.bulk_id) === String(form.input_sku_id))
+    return grp ? grp.outputs.filter(o => !editBomId || o.id !== editBomId).map(o => o.output_sku_id) : []
+  }, [form.input_sku_id, grouped, editBomId])
 
   return (
     <div>
+      {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h2 className="text-lg font-semibold text-gray-800">Conversion Rates</h2>
+          <h2 className="text-lg font-semibold text-gray-800">Bill of Materials</h2>
           <p className="text-sm text-gray-500 mt-0.5">
-            Set how many kg of bulk goes into each retail case — the system uses this to calculate expected consumption and flag waste.
+            For each bulk material you buy, define which retail packs you can produce from it — and how much bulk each case consumes.
           </p>
         </div>
-        <button onClick={openNew} className="btn-primary flex items-center gap-1.5">
-          <Plus size={15} /> Add Conversion Rate
+        <button onClick={() => openNew()} className="btn-primary flex items-center gap-1.5">
+          <Plus size={15} /> Add Product Yield
         </button>
       </div>
 
+      {/* ── Add / Edit form ── */}
       {showForm && (
-        <div className="card mb-4 border border-blue-200 bg-blue-50">
-          <h3 className="font-semibold text-gray-800 mb-3">
-            {editBomId ? '✏️ Edit Conversion Rate' : '⚙️ New Conversion Rate'}
+        <div className="card mb-5 border border-blue-200 bg-gradient-to-br from-blue-50 to-indigo-50">
+          <h3 className="font-semibold text-gray-800 mb-1">
+            {editBomId ? '✏️ Edit yield' : '⚙️ New yield — what retail pack does this bulk produce?'}
           </h3>
-          <p className="text-xs text-gray-500 mb-3">This tells the system how much bulk material (kg) is consumed when you pack one case of a retail product.</p>
-          <form onSubmit={handleSubmit} className="space-y-3">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <p className="text-xs text-gray-500 mb-4">
+            Tell the system: "From <strong>X kg of bulk</strong>, I can pack <strong>one case of this retail product</strong>."
+            You can add multiple retail sizes from the same bulk material.
+          </p>
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+
+            {/* Step 1 — Bulk material */}
+            <div className="bg-white/70 rounded-xl p-4 border border-blue-100">
+              <p className="text-xs font-bold text-blue-700 uppercase tracking-wide mb-2 flex items-center gap-1.5">
+                <span className="w-5 h-5 rounded-full bg-blue-600 text-white text-[10px] font-bold flex items-center justify-center">1</span>
+                Which bulk raw material are you packing from?
+              </p>
+              <select
+                className="input w-full"
+                value={form.input_sku_id}
+                onChange={e => setForm(f => ({ ...f, input_sku_id: e.target.value, output_sku_id: '', qty_per_unit: '' }))}
+                required
+              >
+                <option value="">— Select bulk / raw material SKU —</option>
+                {skus.map(s => <option key={s.id} value={s.id}>{s.product_name} ({s.sku_code})</option>)}
+              </select>
+              <p className="text-xs text-gray-400 mt-1.5">
+                This is the large bag / sack you buy from the mill. E.g. "Chilli Powder Bulk 25KG", "Basmati Rice 50KG sack"
+              </p>
+
+              {/* Show retail packs already set up for this bulk */}
+              {form.input_sku_id && alreadyLinked.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  <span className="text-xs text-gray-500 mr-1">Already set up from this bulk:</span>
+                  {alreadyLinked.map(id => {
+                    const s = skus.find(x => x.id === id)
+                    return s ? (
+                      <span key={id} className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">
+                        ✓ {s.product_name}
+                      </span>
+                    ) : null
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Step 2 — Retail pack */}
+            <div className="bg-white/70 rounded-xl p-4 border border-indigo-100">
+              <p className="text-xs font-bold text-indigo-700 uppercase tracking-wide mb-2 flex items-center gap-1.5">
+                <span className="w-5 h-5 rounded-full bg-indigo-600 text-white text-[10px] font-bold flex items-center justify-center">2</span>
+                What retail product does it produce?
+              </p>
+              <select
+                className="input w-full"
+                value={form.output_sku_id}
+                onChange={e => handleRetailSkuChange(e.target.value)}
+                required
+                disabled={!form.input_sku_id}
+              >
+                <option value="">— Select retail pack SKU —</option>
+                {skus
+                  .filter(s => String(s.id) !== String(form.input_sku_id))
+                  .map(s => (
+                    <option key={s.id} value={s.id} disabled={alreadyLinked.includes(s.id) && !editBomId}>
+                      {s.product_name} ({s.sku_code}){alreadyLinked.includes(s.id) ? ' ✓ already added' : ''}
+                    </option>
+                  ))
+                }
+              </select>
+              <p className="text-xs text-gray-400 mt-1.5">
+                This is the smaller retail unit, e.g. "Chilli Powder 400g × 20/case" or "Chilli Powder 5lb × 10/case".
+                Set the unit weight on SKU Master for auto-calculation.
+              </p>
+
+              {/* Auto-calc preview */}
+              {autoCalcPreview && (
+                <div className="mt-2 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 text-xs text-emerald-800 font-medium flex items-center gap-1.5">
+                  <CheckCircle2 size={13} className="text-emerald-600 flex-shrink-0" />
+                  Auto-calculated from SKU Master: {autoCalcPreview.units} units/case × {autoCalcPreview.weight}{autoCalcPreview.uom} = <strong>{autoCalcPreview.kgPerCase} kg bulk per case</strong>
+                </div>
+              )}
+            </div>
+
+            {/* Step 3 — Consumption + waste */}
+            <div className="bg-white/70 rounded-xl p-4 border border-gray-200 grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Retail product (what you pack into cases) <span className="text-red-500">*</span></label>
-                <select className="input w-full" value={form.output_sku_id} onChange={e => handleOutputSkuChange(e.target.value)} required>
-                  <option value="">Select retail SKU…</option>
-                  {skus.map(s => <option key={s.id} value={s.id}>{s.product_name} ({s.sku_code})</option>)}
-                </select>
-                {autoCalcPreview && (
-                  <p className="text-xs text-emerald-700 mt-1 bg-emerald-50 px-2 py-1 rounded font-medium">
-                    ✓ Auto-calculated: {autoCalcPreview.units} units × {autoCalcPreview.weight}{autoCalcPreview.uom} = {autoCalcPreview.kgPerCase} kg bulk/case
+                <p className="text-xs font-bold text-gray-700 uppercase tracking-wide mb-2 flex items-center gap-1.5">
+                  <span className="w-5 h-5 rounded-full bg-gray-500 text-white text-[10px] font-bold flex items-center justify-center">3</span>
+                  Bulk consumed per case of retail product
+                </p>
+                <div className="flex gap-2">
+                  <input
+                    type="number" step="0.001" min="0.001"
+                    className="input flex-1" placeholder="e.g. 8.0"
+                    value={form.qty_per_unit}
+                    onChange={e => setForm(f => ({ ...f, qty_per_unit: e.target.value }))}
+                    required
+                  />
+                  <input type="text" className="input w-16" placeholder="kg" value={form.unit}
+                    onChange={e => setForm(f => ({ ...f, unit: e.target.value }))} />
+                </div>
+                {!autoCalcPreview && (
+                  <p className="text-xs text-gray-400 mt-1">
+                    Example: 20 × 400g = 8.0 kg/case. Set unit weight in SKU Master to auto-fill.
                   </p>
                 )}
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Bulk material used to make it <span className="text-red-500">*</span></label>
-                <select className="input w-full" value={form.input_sku_id} onChange={e => setForm(f => ({ ...f, input_sku_id: e.target.value }))} required>
-                  <option value="">Select bulk SKU…</option>
-                  {skus.map(s => <option key={s.id} value={s.id}>{s.product_name} ({s.sku_code})</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Bulk consumed per case (kg) <span className="text-red-500">*</span></label>
-                <div className="flex gap-2">
-                  <input type="number" step="0.001" min="0.001" className="input flex-1" placeholder="e.g. 8.0" value={form.qty_per_unit} onChange={e => setForm(f => ({ ...f, qty_per_unit: e.target.value }))} required />
-                  <input type="text" className="input w-20" placeholder="kg" value={form.unit} onChange={e => setForm(f => ({ ...f, unit: e.target.value }))} />
-                </div>
-                <p className="text-xs text-gray-400 mt-1">
-                  {autoCalcPreview
-                    ? `Auto-filled from SKU master: ${autoCalcPreview.units} units × ${autoCalcPreview.weight}${autoCalcPreview.uom}. Edit SKU Master to change unit weight.`
-                    : 'Example: 20 × 400g packs = 8.0 kg bulk per case. Set unit weight on SKU Master for auto-fill.'}
-                </p>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">
-                  Acceptable waste % <span className="text-gray-400 font-normal">(flag threshold)</span>
+                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wide mb-2">
+                  Acceptable waste % <span className="text-gray-400 font-normal normal-case">(flag threshold)</span>
                 </label>
-                <input type="number" step="0.1" min="0" max="100" className="input w-full" value={form.waste_pct_allowed} onChange={e => setForm(f => ({ ...f, waste_pct_allowed: e.target.value }))} />
+                <input type="number" step="0.1" min="0" max="100" className="input w-full"
+                  value={form.waste_pct_allowed}
+                  onChange={e => setForm(f => ({ ...f, waste_pct_allowed: e.target.value }))} />
                 <p className="text-xs text-gray-400 mt-1">
-                  If actual bulk used exceeds the expected amount by more than this %, the run is flagged red for investigation. It does not block anything — it's just a warning threshold.
+                  Run goes <span className="text-red-600 font-medium">red</span> if actual bulk used is more than this % over expected. Doesn't block anything — warning only.
                 </p>
               </div>
             </div>
+
             <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Notes</label>
-              <input type="text" className="input w-full" placeholder="Optional notes…" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
+              <label className="block text-xs font-medium text-gray-700 mb-1">Notes (optional)</label>
+              <input type="text" className="input w-full" placeholder="Any extra notes…"
+                value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
             </div>
+
             {formError && <p className="text-sm text-red-600 flex items-center gap-1"><AlertTriangle size={14} /> {formError}</p>}
             <div className="flex gap-2">
               <button type="submit" className="btn-primary flex items-center gap-1.5" disabled={saving}>
                 {saving && <Loader2 size={14} className="animate-spin" />}
-                {editBomId ? 'Update' : 'Save Conversion Rate'}
+                {editBomId ? 'Update' : 'Save Yield'}
               </button>
-              <button type="button" className="btn-secondary" onClick={() => { setShowForm(false); setEditBomId(null) }}>Cancel</button>
+              <button type="button" className="btn-secondary"
+                onClick={() => { setShowForm(false); setEditBomId(null) }}>Cancel</button>
             </div>
           </form>
         </div>
       )}
 
+      {/* ── List ── */}
       {loading ? (
         <div className="flex justify-center py-12"><Loader2 className="animate-spin text-blue-500" size={28} /></div>
       ) : error ? (
         <div className="card text-red-600 flex items-center gap-2"><AlertTriangle size={18} /> {error}</div>
-      ) : boms.length === 0 ? (
+      ) : grouped.length === 0 ? (
         <div className="card text-center py-12 text-gray-400">
           <Package size={36} className="mx-auto mb-3 opacity-30" />
-          <p className="font-medium">No conversion rates set up yet.</p>
-          <p className="text-sm mt-1">Add your first conversion rate to tell the system how many kg of bulk go into each retail case.</p>
-          <button onClick={openNew} className="btn-primary mt-4 mx-auto">+ Add First Conversion Rate</button>
+          <p className="font-medium">No yields set up yet.</p>
+          <p className="text-sm mt-1 max-w-sm mx-auto">
+            Start by picking a bulk material (e.g. Chilli Powder 100 kg sack), then add the retail pack sizes you produce from it.
+          </p>
+          <button onClick={() => openNew()} className="btn-primary mt-4 mx-auto">+ Add First Yield</button>
         </div>
       ) : (
-        <div className="card p-0 overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 text-xs text-gray-500 uppercase tracking-wide">
-              <tr>
-                <th className="px-4 py-3 text-left">Retail Product (output)</th>
-                <th className="px-4 py-3 text-left">Bulk Material (input)</th>
-                <th className="px-4 py-3 text-right">Bulk kg / case</th>
-                <th className="px-4 py-3 text-right">Waste flag %</th>
-                <th className="px-4 py-3 text-left">Notes</th>
-                <th className="px-4 py-3" />
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {boms.map(b => (
-                <tr key={b.id} className={`hover:bg-gray-50 ${editBomId === b.id ? 'bg-blue-50' : ''}`}>
-                  <td className="px-4 py-3"><div className="font-medium text-gray-800">{b.output_sku_name}</div><div className="text-xs text-gray-400">{b.output_sku_code}</div></td>
-                  <td className="px-4 py-3"><div className="font-medium text-gray-800">{b.input_sku_name}</div><div className="text-xs text-gray-400">{b.input_sku_code}</div></td>
-                  <td className="px-4 py-3 text-right font-mono">{b.qty_per_unit} {b.unit}</td>
-                  <td className="px-4 py-3 text-right">{b.waste_pct_allowed}%</td>
-                  <td className="px-4 py-3 text-gray-500 text-xs">{b.notes || '—'}</td>
-                  <td className="px-4 py-3 text-right">
-                    <div className="flex items-center justify-end gap-1">
-                      <button onClick={() => openEdit(b)} className="p-1.5 text-gray-400 hover:text-blue-500 rounded transition-colors" title="Edit BOM"><Edit2 size={13} /></button>
-                      <button onClick={() => handleDelete(b.id)} className="p-1.5 text-gray-400 hover:text-red-500 rounded transition-colors" title="Delete BOM"><Trash2 size={14} /></button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="space-y-4">
+          {grouped.map(group => (
+            <div key={group.bulk_id} className="card p-0 overflow-hidden border border-gray-200">
+              {/* Bulk material header */}
+              <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-200">
+                <div className="flex items-center gap-2.5">
+                  <span className="text-lg">📦</span>
+                  <div>
+                    <p className="font-semibold text-gray-800 text-sm">{group.bulk_name}</p>
+                    <p className="text-xs text-gray-400 font-mono">{group.bulk_code}</p>
+                  </div>
+                  <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium ml-2">
+                    {group.outputs.length} retail pack{group.outputs.length !== 1 ? 's' : ''}
+                  </span>
+                </div>
+                <button
+                  onClick={() => openNew(group.bulk_id)}
+                  className="text-xs text-blue-600 hover:text-blue-800 border border-blue-200 hover:border-blue-400 px-2.5 py-1 rounded-lg transition-colors flex items-center gap-1"
+                >
+                  <Plus size={11} /> Add retail product
+                </button>
+              </div>
+
+              {/* Retail outputs table */}
+              <table className="w-full text-sm">
+                <thead className="bg-white text-xs text-gray-400 uppercase tracking-wide border-b border-gray-100">
+                  <tr>
+                    <th className="px-4 py-2 text-left pl-8">Retail pack you produce</th>
+                    <th className="px-4 py-2 text-right">Units / case</th>
+                    <th className="px-4 py-2 text-right">Bulk consumed / case</th>
+                    <th className="px-4 py-2 text-right">Waste flag %</th>
+                    <th className="px-4 py-2 text-left">Notes</th>
+                    <th className="px-4 py-2 w-16" />
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {group.outputs.map(b => {
+                    const sku = skus.find(s => s.id === b.output_sku_id)
+                    return (
+                      <tr key={b.id} className={`hover:bg-gray-50 transition-colors ${editBomId === b.id ? 'bg-blue-50' : ''}`}>
+                        <td className="px-4 py-3 pl-8">
+                          <div className="flex items-center gap-2">
+                            <span className="text-gray-400">↳</span>
+                            <div>
+                              <div className="font-medium text-gray-800">{b.output_sku_name}</div>
+                              <div className="text-xs text-gray-400 font-mono">{b.output_sku_code}</div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-right text-gray-600">
+                          {sku?.case_size ? (
+                            <span>{sku.case_size} × {sku.unit_weight ? `${sku.unit_weight}${sku.unit_weight_uom || 'g'}` : sku.unit_label}</span>
+                          ) : '—'}
+                        </td>
+                        <td className="px-4 py-3 text-right font-mono font-semibold text-gray-800">
+                          {b.qty_per_unit} {b.unit}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                            b.waste_pct_allowed <= 2 ? 'bg-green-100 text-green-700' :
+                            b.waste_pct_allowed <= 5 ? 'bg-amber-100 text-amber-700' :
+                            'bg-red-100 text-red-700'
+                          }`}>{b.waste_pct_allowed}%</span>
+                        </td>
+                        <td className="px-4 py-3 text-gray-400 text-xs">{b.notes || '—'}</td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center justify-end gap-1">
+                            <button onClick={() => openEdit(b)} className="p-1.5 text-gray-400 hover:text-blue-500 rounded transition-colors" title="Edit"><Edit2 size={13} /></button>
+                            <button onClick={() => handleDelete(b.id)} className="p-1.5 text-gray-400 hover:text-red-500 rounded transition-colors" title="Remove"><Trash2 size={14} /></button>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ))}
         </div>
       )}
     </div>
@@ -2352,7 +2489,7 @@ function SummaryTab() {
 }
 
 // ── Main Repacking page ───────────────────────────────────────
-const TABS = ['Conversion Rates', 'Purchases', 'Packing Runs', 'Summary']
+const TABS = ['Bill of Materials', 'Purchases', 'Packing Runs', 'Summary']
 
 export default function Repacking() {
   const [activeTab, setActiveTab]       = useState(2)
