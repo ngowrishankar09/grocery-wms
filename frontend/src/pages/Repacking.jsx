@@ -329,13 +329,13 @@ function BOMTab({ skus }) {
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h2 className="text-lg font-semibold text-gray-800">Bill of Materials</h2>
+          <h2 className="text-lg font-semibold text-gray-800">My Products</h2>
           <p className="text-sm text-gray-500 mt-0.5">
-            For each bulk material you buy, define which retail packs you can produce from it — and how much bulk each case consumes.
+            For each raw material you buy in bulk, tell us which retail pack sizes you produce from it. Do this once — the system uses it to track usage and costs automatically.
           </p>
         </div>
         <button onClick={() => openNew()} className="btn-primary flex items-center gap-1.5">
-          <Plus size={15} /> Add Product Yield
+          <Plus size={15} /> Add Product
         </button>
       </div>
 
@@ -343,27 +343,27 @@ function BOMTab({ skus }) {
       {showForm && (
         <div className="card mb-5 border border-blue-200">
           <h3 className="font-semibold text-gray-800 mb-4">
-            {editBomId ? '✏️ Edit' : '+ New yield'}
+            {editBomId ? '✏️ Edit product' : '+ Add product'}
           </h3>
           <form onSubmit={handleSubmit} className="space-y-3">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {/* Bulk material */}
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Bulk material <span className="text-red-500">*</span></label>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Raw material you buy in bulk <span className="text-red-500">*</span></label>
                 <select
                   className="input w-full"
                   value={form.input_sku_id}
                   onChange={e => setForm(f => ({ ...f, input_sku_id: e.target.value, output_sku_id: '', qty_per_unit: '' }))}
                   required
                 >
-                  <option value="">Select bulk SKU…</option>
+                  <option value="">e.g. Chilli Powder Bulk 25KG…</option>
                   {skus.map(s => <option key={s.id} value={s.id}>{s.product_name} ({s.sku_code})</option>)}
                 </select>
               </div>
 
               {/* Retail pack */}
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Retail pack you produce from it <span className="text-red-500">*</span></label>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Retail product you pack it into <span className="text-red-500">*</span></label>
                 <select
                   className="input w-full"
                   value={form.output_sku_id}
@@ -371,7 +371,7 @@ function BOMTab({ skus }) {
                   required
                   disabled={!form.input_sku_id}
                 >
-                  <option value="">Select retail SKU…</option>
+                  <option value="">e.g. Chilli Powder 400g × 20/case…</option>
                   {skus
                     .filter(s => String(s.id) !== String(form.input_sku_id))
                     .map(s => (
@@ -390,7 +390,7 @@ function BOMTab({ skus }) {
 
               {/* kg per case */}
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Bulk consumed per case <span className="text-red-500">*</span></label>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Raw material used per case <span className="text-red-500">*</span></label>
                 <div className="flex gap-2">
                   <input type="number" step="0.001" min="0.001" className="input flex-1" placeholder="e.g. 8.0"
                     value={form.qty_per_unit} onChange={e => setForm(f => ({ ...f, qty_per_unit: e.target.value }))} required />
@@ -401,7 +401,7 @@ function BOMTab({ skus }) {
 
               {/* Waste % */}
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Max waste % <span className="text-gray-400 font-normal">(flag threshold)</span></label>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Acceptable loss % <span className="text-gray-400 font-normal">(warn me if over this)</span></label>
                 <input type="number" step="0.1" min="0" max="100" className="input w-full"
                   value={form.waste_pct_allowed} onChange={e => setForm(f => ({ ...f, waste_pct_allowed: e.target.value }))} />
               </div>
@@ -428,11 +428,11 @@ function BOMTab({ skus }) {
       ) : grouped.length === 0 ? (
         <div className="card text-center py-12 text-gray-400">
           <Package size={36} className="mx-auto mb-3 opacity-30" />
-          <p className="font-medium">No yields set up yet.</p>
+          <p className="font-medium">No products set up yet.</p>
           <p className="text-sm mt-1 max-w-sm mx-auto">
-            Start by picking a bulk material (e.g. Chilli Powder 100 kg sack), then add the retail pack sizes you produce from it.
+            Start here. Pick the raw material you buy (e.g. Chilli Powder bulk sack), then tell us which retail sizes you pack from it — e.g. 400g bags, 800g bags, 5lb bags.
           </p>
-          <button onClick={() => openNew()} className="btn-primary mt-4 mx-auto">+ Add First Yield</button>
+          <button onClick={() => openNew()} className="btn-primary mt-4 mx-auto">+ Add My First Product</button>
         </div>
       ) : (
         <div className="space-y-4">
@@ -462,10 +462,10 @@ function BOMTab({ skus }) {
               <table className="w-full text-sm">
                 <thead className="bg-white text-xs text-gray-400 uppercase tracking-wide border-b border-gray-100">
                   <tr>
-                    <th className="px-4 py-2 text-left pl-8">Retail pack you produce</th>
-                    <th className="px-4 py-2 text-right">Units / case</th>
-                    <th className="px-4 py-2 text-right">Bulk consumed / case</th>
-                    <th className="px-4 py-2 text-right">Waste flag %</th>
+                    <th className="px-4 py-2 text-left pl-8">Retail product</th>
+                    <th className="px-4 py-2 text-right">Pack size</th>
+                    <th className="px-4 py-2 text-right">Raw material per case</th>
+                    <th className="px-4 py-2 text-right">Acceptable loss %</th>
                     <th className="px-4 py-2 text-left">Notes</th>
                     <th className="px-4 py-2 w-16" />
                   </tr>
@@ -717,41 +717,41 @@ function PurchasesTab({ skus }) {
     <div>
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h2 className="text-lg font-semibold text-gray-800">Purchases / Shipments</h2>
+          <h2 className="text-lg font-semibold text-gray-800">Stock Received</h2>
           <p className="text-sm text-gray-500 mt-0.5">
-            Record multi-SKU purchase shipments. Shared freight, duty &amp; overhead are auto-allocated proportionally by weight to each bulk SKU line.
+            Every time bulk material arrives from your supplier, log it here. Include what it cost — material, freight, duty, anything. The system calculates your exact cost per kg.
           </p>
         </div>
         <button onClick={openNew} className="btn-primary flex items-center gap-1.5">
-          <Plus size={15} /> New Purchase
+          <Plus size={15} /> Record a Delivery
         </button>
       </div>
 
       {showForm && (
         <div className="card mb-6 border border-green-200 bg-green-50">
           <h3 className="font-semibold text-gray-800 mb-4">
-            {editId ? '✏️ Edit Purchase Batch' : '📦 New Purchase Batch'}
+            {editId ? '✏️ Edit delivery record' : '📦 Record a new delivery'}
           </h3>
           <form onSubmit={handleSubmit} className="space-y-5">
 
             {/* ── Shipment header ─────────────────────────────── */}
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Shipment Details</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Delivery Details</p>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Batch Reference</label>
-                  <input type="text" className="input w-full" placeholder="e.g. India Apr 2026" value={form.batch_ref} onChange={e => setForm(f => ({ ...f, batch_ref: e.target.value }))} />
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Invoice / Reference No.</label>
+                  <input type="text" className="input w-full" placeholder="e.g. INV-2026-041" value={form.batch_ref} onChange={e => setForm(f => ({ ...f, batch_ref: e.target.value }))} />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Supplier / Mill Name</label>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Supplier / Mill</label>
                   <input type="text" className="input w-full" placeholder="e.g. Kohinoor Foods Ltd" value={form.supplier} onChange={e => setForm(f => ({ ...f, supplier: e.target.value }))} />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Supplier Country</label>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Country of Origin</label>
                   <input type="text" className="input w-full" placeholder="e.g. India, Pakistan…" value={form.supplier_country} onChange={e => setForm(f => ({ ...f, supplier_country: e.target.value }))} />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Purchase Date</label>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Date Received</label>
                   <input type="date" className="input w-full" value={form.purchase_date} onChange={e => setForm(f => ({ ...f, purchase_date: e.target.value }))} />
                 </div>
               </div>
@@ -784,10 +784,10 @@ function PurchasesTab({ skus }) {
               <div className="flex items-center justify-between mb-2">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                    Shipment Cost Lines
-                    <span className="ml-1 font-normal text-gray-400 normal-case">— each cost can be in a different currency</span>
+                    What did this delivery cost?
+                    <span className="ml-1 font-normal text-gray-400 normal-case">— add as many cost lines as you need, each in its own currency</span>
                   </p>
-                  <p className="text-xs text-gray-400 mt-0.5">Add material cost, freight, duty, handling — anything. Each gets its own currency &amp; FX rate.</p>
+                  <p className="text-xs text-gray-400 mt-0.5">Include everything: material cost, sea freight, import duty, handling charges. Each can be in a different currency.</p>
                 </div>
                 <button type="button" onClick={addCostLine} className="text-xs text-blue-600 hover:text-blue-800 font-semibold flex items-center gap-1 whitespace-nowrap">
                   <Plus size={12} /> Add Cost Line
@@ -838,10 +838,10 @@ function PurchasesTab({ skus }) {
             <div>
               <div className="flex items-center justify-between mb-2">
                 <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                  SKU Lines <span className="font-normal text-gray-400 normal-case ml-1">— add each bulk material in this shipment</span>
+                  What arrived in this delivery? <span className="font-normal text-gray-400 normal-case ml-1">— one row per product</span>
                 </p>
                 <button type="button" onClick={addLine} className="text-xs text-blue-600 hover:text-blue-800 font-semibold flex items-center gap-1">
-                  <Plus size={12} /> Add SKU
+                  <Plus size={12} /> Add product
                 </button>
               </div>
               <div className="space-y-3">
@@ -864,7 +864,7 @@ function PurchasesTab({ skus }) {
                       </div>
                       <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-2">
                         <div className="md:col-span-2">
-                          <label className="block text-xs font-medium text-gray-700 mb-1">Bulk SKU <span className="text-red-500">*</span></label>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">Raw material <span className="text-red-500">*</span></label>
                           <SKUSearch
                             skus={skus}
                             value={line.bulk_sku_id}
@@ -874,7 +874,7 @@ function PurchasesTab({ skus }) {
                           />
                         </div>
                         <div>
-                          <label className="block text-xs font-medium text-gray-700 mb-1">Qty (kg) <span className="text-red-500">*</span></label>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">Quantity received (kg) <span className="text-red-500">*</span></label>
                           <input type="number" step="0.001" min="0.001" className="input w-full text-sm" placeholder="e.g. 1000"
                             value={line.qty_kg} onChange={e => updateLine(i, 'qty_kg', e.target.value)} required />
                         </div>
@@ -928,7 +928,7 @@ function PurchasesTab({ skus }) {
             <div className="flex gap-2">
               <button type="submit" className="btn-primary flex items-center gap-1.5" disabled={saving}>
                 {saving && <Loader2 size={14} className="animate-spin" />}
-                {editId ? 'Update Purchase' : 'Save Purchase'}
+                {editId ? 'Update Record' : 'Save Delivery Record'}
               </button>
               <button type="button" className="btn-secondary" onClick={() => { setShowForm(false); setEditId(null) }}>Cancel</button>
             </div>
@@ -943,9 +943,9 @@ function PurchasesTab({ skus }) {
       ) : purchases.length === 0 ? (
         <div className="card text-center py-12 text-gray-400">
           <DollarSign size={36} className="mx-auto mb-3 opacity-30" />
-          <p className="font-medium">No purchase batches recorded yet.</p>
-          <p className="text-sm mt-1">Create a purchase to track costs across multiple bulk SKUs in one shipment.</p>
-          <button onClick={openNew} className="btn-primary mt-4 mx-auto">+ New Purchase</button>
+          <p className="font-medium">No deliveries recorded yet.</p>
+          <p className="text-sm mt-1">When bulk material arrives from your supplier, record it here with the weight and what it cost. That's how the system knows your cost per kg.</p>
+          <button onClick={openNew} className="btn-primary mt-4 mx-auto">+ Record First Delivery</button>
         </div>
       ) : (
         <div className="space-y-3">
@@ -1222,15 +1222,15 @@ function OperationalCostsCard({ runDetail, onSaved }) {
     <div className="card space-y-5">
       <div className="flex items-center gap-2">
         <DollarSign size={18} className="text-green-600" />
-        <h3 className="font-semibold text-gray-800 text-base">Packing Unit Costs</h3>
+        <h3 className="font-semibold text-gray-800 text-base">What did this session cost?</h3>
       </div>
 
       <div>
         <div className="flex items-center justify-between mb-3">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-              Cost Lines
-              <span className="ml-1 normal-case font-normal text-gray-400">— labour, packaging, transport — each in its own currency</span>
+              Costs incurred during packing
+              <span className="ml-1 normal-case font-normal text-gray-400">— e.g. labour, packaging materials, transport — each in any currency</span>
             </p>
           </div>
           <button type="button" onClick={addLine} className="text-xs text-blue-600 hover:text-blue-800 font-semibold flex items-center gap-1">
@@ -1255,7 +1255,7 @@ function OperationalCostsCard({ runDetail, onSaved }) {
               <span className="ml-2 font-bold text-gray-800">{fmt$(totalLinesUsd)}</span>
             </div>
             <div>
-              <span className="text-gray-500">Cost per case</span>
+              <span className="text-gray-500">Cost per box</span>
               <span className="ml-2 font-bold text-gray-800">{fmt$(totalCases > 0 ? totalLinesUsd / totalCases : 0)}</span>
               <span className="text-xs text-gray-400 ml-1">({totalCases.toFixed(2)} cases)</span>
             </div>
@@ -1271,12 +1271,12 @@ function OperationalCostsCard({ runDetail, onSaved }) {
 
       <div>
         <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-3">
-          Full Cost Summary
-          <span className="ml-1 normal-case font-normal text-gray-400">— bulk material + packing costs combined (available after closing the run)</span>
+          Total cost per box
+          <span className="ml-1 normal-case font-normal text-gray-400">— raw material + packing costs combined (available after closing the session)</span>
         </p>
         {runDetail.status === 'open' ? (
           <div className="text-sm text-gray-500 italic bg-gray-50 rounded-lg p-3">
-            Cost breakdown will be available once you close the run.
+            Full cost breakdown will show here once you close the session.
           </div>
         ) : loadingSummary ? (
           <div className="flex justify-center py-6"><Loader2 className="animate-spin text-blue-500" size={20} /></div>
@@ -1284,8 +1284,8 @@ function OperationalCostsCard({ runDetail, onSaved }) {
           <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-start gap-2 text-sm text-amber-800">
             <AlertTriangle size={15} className="mt-0.5 shrink-0" />
             <span>
-              No purchase cost found for <strong>{summary.bulk_sku_name || 'the bulk materials in this run'}</strong>.
-              {' '}Go to the <strong>Purchases</strong> tab and record the purchase you used — then come back here to see the full cost breakdown.
+              No purchase cost found for <strong>{summary.bulk_sku_name || 'the raw materials in this session'}</strong>.
+              {' '}Go to <strong>Stock Received</strong> and record the delivery you used — then come back here to see the full cost breakdown.
             </span>
           </div>
         ) : summary ? (
@@ -1517,7 +1517,7 @@ function RunsTab({ skus, landedCosts }) {
   }
 
   const handleReopenRun = async () => {
-    if (!window.confirm('Reopen this run? Variance stats will be cleared and recalculated on next close.')) return
+    if (!window.confirm('Re-open this session? The difference calculation will be cleared and recalculated when you close again.')) return
     try {
       const res = await repackingAPI.reopenRun(runDetail.id)
       setRunDetail(res.data)
@@ -1558,7 +1558,7 @@ function RunsTab({ skus, landedCosts }) {
           onClick={() => { setSelectedRun(null); setRunDetail(null) }}
           className="flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-800 mb-4 font-medium"
         >
-          <ChevronLeft size={16} /> Back to Runs
+          <ChevronLeft size={16} /> Back to Sessions
         </button>
 
         {detailLoading && !runDetail ? (
@@ -1573,7 +1573,7 @@ function RunsTab({ skus, landedCosts }) {
                     <StatusBadge status={runDetail.status} />
                     {runDetail.flag_high_variance && (
                       <span className="flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full bg-red-100 text-red-700">
-                        <AlertTriangle size={11} /> HIGH VARIANCE
+                        <AlertTriangle size={11} /> More bulk used than expected — investigate
                       </span>
                     )}
                     {runDetail.linked_batch_ref && (
@@ -1585,16 +1585,16 @@ function RunsTab({ skus, landedCosts }) {
                       <button
                         onClick={handleReopenRun}
                         className="text-xs font-medium px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 hover:bg-amber-200 transition-colors"
-                        title="Re-open this run to add more outputs or adjust bulk weights"
+                        title="Re-open this session to add more outputs or adjust bulk weights"
                       >
-                        ↩ Reopen Run
+                        ↩ Re-open Session
                       </button>
                     )}
                   </div>
-                  <h2 className="text-lg font-bold text-gray-800">{runDetail.run_ref || `Run #${runDetail.id}`}</h2>
+                  <h2 className="text-lg font-bold text-gray-800">{runDetail.run_ref || `Session #${runDetail.id}`}</h2>
                   <div className="flex flex-wrap gap-4 mt-2 text-sm text-gray-500">
                     <span>Started: {runDetail.created_at ? new Date(runDetail.created_at).toLocaleString() : '—'}</span>
-                    {runDetail.started_by && <span>Operator: <span className="font-medium text-gray-700">{runDetail.started_by}</span></span>}
+                    {runDetail.started_by && <span>Packed by: <span className="font-medium text-gray-700">{runDetail.started_by}</span></span>}
                     {runDetail.closed_at && <span>Closed: {new Date(runDetail.closed_at).toLocaleString()}</span>}
                     {runDetail.linked_cost_per_kg != null && (
                       <span>
@@ -1641,10 +1641,10 @@ function RunsTab({ skus, landedCosts }) {
             {/* Outputs section */}
             <div className="card">
               <div className="flex items-center justify-between mb-3">
-                <h3 className="font-semibold text-gray-800">Cases Packed</h3>
+                <h3 className="font-semibold text-gray-800">What was packed</h3>
                 {runDetail.status === 'open' && (
                   <button onClick={() => { setShowAddOutput(s => !s); setOutputFormError(null) }} className="btn-secondary flex items-center gap-1.5 text-sm">
-                    <Plus size={14} /> Add Cases
+                    <Plus size={14} /> Log what I packed
                   </button>
                 )}
               </div>
@@ -1660,16 +1660,16 @@ function RunsTab({ skus, landedCosts }) {
                       <>
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
                           <div>
-                            <label className="block text-xs font-medium text-gray-700 mb-1">Retail SKU (what was packed) <span className="text-red-500">*</span></label>
+                            <label className="block text-xs font-medium text-gray-700 mb-1">Which retail product did you pack? <span className="text-red-500">*</span></label>
                             <select className="input w-full" value={outputForm.sku_id} onChange={e => setOutputForm(f => ({ ...f, sku_id: e.target.value }))} required>
-                              <option value="">Select SKU…</option>
+                              <option value="">Select product…</option>
                               {skus.map(s => <option key={s.id} value={s.id}>{s.product_name} ({s.sku_code})</option>)}
                             </select>
                           </div>
                           <div>
                             <label className="block text-xs font-medium text-gray-700 mb-1">
-                              Units actually packed <span className="text-red-500">*</span>
-                              {caseSize && <span className="ml-1 text-gray-400 font-normal">(1 case = {caseSize} units)</span>}
+                              How many units did you pack? <span className="text-red-500">*</span>
+                              {caseSize && <span className="ml-1 text-gray-400 font-normal">(1 box = {caseSize} units)</span>}
                             </label>
                             <input type="number" step="1" min="0" className="input w-full" placeholder="e.g. 220"
                               value={outputForm.units_packed} onChange={e => setOutputForm(f => ({ ...f, units_packed: e.target.value }))} required />
@@ -1677,7 +1677,7 @@ function RunsTab({ skus, landedCosts }) {
                           </div>
                           <div>
                             <label className="block text-xs font-medium text-gray-700 mb-1">
-                              Units planned <span className="text-gray-400 font-normal">(optional — for shortage tracking)</span>
+                              How many were you supposed to pack? <span className="text-gray-400 font-normal">(optional)</span>
                             </label>
                             <input type="number" step="1" min="0" className="input w-full" placeholder="e.g. 245"
                               value={outputForm.units_planned} onChange={e => setOutputForm(f => ({ ...f, units_planned: e.target.value }))} />
@@ -1702,16 +1702,16 @@ function RunsTab({ skus, landedCosts }) {
               )}
 
               {runDetail.outputs.length === 0 ? (
-                <p className="text-sm text-gray-400 py-4 text-center">No outputs added yet. Add each product type you packed.</p>
+                <p className="text-sm text-gray-400 py-4 text-center">Nothing logged yet. Use "Log what I packed" to record each retail product you packed in this session.</p>
               ) : (
                 <table className="w-full text-sm">
                   <thead className="text-xs text-gray-500 uppercase tracking-wide">
                     <tr>
-                      <th className="pb-2 text-left">SKU</th>
-                      <th className="pb-2 text-right">Units</th>
-                      <th className="pb-2 text-right">Cases</th>
-                      <th className="pb-2 text-right">BOM rate</th>
-                      <th className="pb-2 text-right">Bulk used</th>
+                      <th className="pb-2 text-left">Product</th>
+                      <th className="pb-2 text-right">Units packed</th>
+                      <th className="pb-2 text-right">Boxes</th>
+                      <th className="pb-2 text-right">Expected usage</th>
+                      <th className="pb-2 text-right">Raw material used</th>
                       {runDetail.status === 'open' && <th className="pb-2" />}
                     </tr>
                   </thead>
@@ -1745,8 +1745,8 @@ function RunsTab({ skus, landedCosts }) {
                           <td className="py-2 text-right font-mono font-semibold">{(+o.qty_packed).toFixed(2)}</td>
                           <td className="py-2 text-right text-xs text-gray-500">
                             {o.bom_qty_per_unit != null
-                              ? `${o.bom_qty_per_unit} ${o.bom_unit ?? 'kg'}/case`
-                              : <span className="text-orange-500">No BOM</span>}
+                              ? `${o.bom_qty_per_unit} ${o.bom_unit ?? 'kg'}/box`
+                              : <span className="text-orange-500">Not set up</span>}
                           </td>
                           <td className="py-2 text-right font-mono">
                             {liveKg != null
@@ -1824,7 +1824,7 @@ function RunsTab({ skus, landedCosts }) {
             {/* Bulk usage section */}
             <div className="card">
               <div className="flex items-center justify-between mb-3">
-                <h3 className="font-semibold text-gray-800">Bulk Material Usage</h3>
+                <h3 className="font-semibold text-gray-800">Raw Material Used</h3>
                 {runDetail.status === 'open' && (
                   <button
                     onClick={() => { setShowAddBulk(s => !s); setAddBulkError(null) }}
@@ -1931,15 +1931,15 @@ function RunsTab({ skus, landedCosts }) {
                             </p>
                             <div className="flex items-center justify-between">
                               <div>
-                                <p className="text-xs text-gray-500">Expected remaining on scale</p>
+                                <p className="text-xs text-gray-500">Expected weight remaining on scale</p>
                                 <p className="text-2xl font-black text-blue-700">{expected != null ? `${expected.toFixed(3)} kg` : '—'}</p>
-                                <p className="text-xs text-gray-400 mt-0.5">({b.qty_start} kg start − {theoretical.toFixed(3)} kg theoretical use)</p>
+                                <p className="text-xs text-gray-400 mt-0.5">({b.qty_start} kg you started with − {theoretical.toFixed(3)} kg expected to be used)</p>
                               </div>
                             </div>
                           </div>
                           <div>
                             <label className="block text-sm font-semibold text-gray-700 mb-1">
-                              Weigh the remaining bulk → enter actual weight on scale (kg)
+                              Put the leftover bulk back on the scale — what does it weigh? (kg)
                             </label>
                             <div className="flex items-center gap-3">
                               <input
@@ -1956,10 +1956,10 @@ function RunsTab({ skus, landedCosts }) {
                           {liveVariance != null && (
                             <div className={`rounded-lg px-4 py-3 ${Math.abs(liveVariancePct ?? 0) <= 2 ? 'bg-green-50 border border-green-200' : Math.abs(liveVariancePct ?? 0) <= 5 ? 'bg-amber-50 border border-amber-200' : 'bg-red-50 border border-red-200'}`}>
                               <div className="grid grid-cols-3 gap-3 text-sm">
-                                <div><p className="text-xs text-gray-500">Theoretical used</p><p className="font-bold">{theoretical.toFixed(3)} kg</p></div>
-                                <div><p className="text-xs text-gray-500">Actual used</p><p className="font-bold">{actualUsed?.toFixed(3)} kg</p></div>
+                                <div><p className="text-xs text-gray-500">Expected to be used</p><p className="font-bold">{theoretical.toFixed(3)} kg</p></div>
+                                <div><p className="text-xs text-gray-500">Actually used</p><p className="font-bold">{actualUsed?.toFixed(3)} kg</p></div>
                                 <div>
-                                  <p className="text-xs text-gray-500">Variance</p>
+                                  <p className="text-xs text-gray-500">Difference</p>
                                   <p className={`font-bold ${varianceColor(liveVariancePct)}`}>
                                     {liveVariance >= 0 ? '+' : ''}{liveVariance.toFixed(3)} kg
                                     {liveVariancePct != null && <span className="ml-1 text-xs">({liveVariancePct >= 0 ? '+' : ''}{liveVariancePct.toFixed(1)}%)</span>}
@@ -1967,13 +1967,13 @@ function RunsTab({ skus, landedCosts }) {
                                 </div>
                               </div>
                               {liveVariancePct != null && Math.abs(liveVariancePct) > 5 && (
-                                <p className="mt-2 text-sm font-bold text-red-700 flex items-center gap-1"><AlertTriangle size={14} /> HIGH VARIANCE — {Math.abs(liveVariance).toFixed(3)} kg unaccounted for.</p>
+                                <p className="mt-2 text-sm font-bold text-red-700 flex items-center gap-1"><AlertTriangle size={14} /> {Math.abs(liveVariance).toFixed(3)} kg is unaccounted for — this is more than expected. You should investigate before closing.</p>
                               )}
                               {liveVariancePct != null && Math.abs(liveVariancePct) > 2 && Math.abs(liveVariancePct) <= 5 && (
-                                <p className="mt-2 text-sm font-semibold text-amber-700 flex items-center gap-1"><AlertTriangle size={14} /> Above normal waste tolerance — review before closing.</p>
+                                <p className="mt-2 text-sm font-semibold text-amber-700 flex items-center gap-1"><AlertTriangle size={14} /> Slightly more bulk was used than expected. Worth noting — you can still close.</p>
                               )}
                               {liveVariancePct != null && Math.abs(liveVariancePct) <= 2 && (
-                                <p className="mt-2 text-sm font-semibold text-green-700 flex items-center gap-1"><CheckCircle2 size={14} /> All bulk accounted for — within acceptable range.</p>
+                                <p className="mt-2 text-sm font-semibold text-green-700 flex items-center gap-1"><CheckCircle2 size={14} /> All bulk is accounted for — everything looks good.</p>
                               )}
                             </div>
                           )}
@@ -1983,7 +1983,7 @@ function RunsTab({ skus, landedCosts }) {
                     {closeError && <p className="text-sm text-red-600 flex items-center gap-1"><AlertTriangle size={14} /> {closeError}</p>}
                     <div className="flex gap-2">
                       <button type="submit" className="btn-primary flex items-center gap-1.5" disabled={closing}>
-                        {closing && <Loader2 size={14} className="animate-spin" />} Confirm & Close Run
+                        {closing && <Loader2 size={14} className="animate-spin" />} Confirm & Close Session
                       </button>
                       <button type="button" className="btn-secondary" onClick={() => setShowClose(false)}>Cancel</button>
                     </div>
@@ -2002,42 +2002,43 @@ function RunsTab({ skus, landedCosts }) {
     <div>
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h2 className="text-lg font-semibold text-gray-800">Packing Runs</h2>
-          <p className="text-sm text-gray-500 mt-0.5">Track each bulk-to-retail packing session and measure waste.</p>
+          <h2 className="text-lg font-semibold text-gray-800">Packing Sessions</h2>
+          <p className="text-sm text-gray-500 mt-0.5">Each time you pack, start a session. The system tracks how much raw material you used, how many units you produced, and flags anything unusual.</p>
         </div>
         <button onClick={() => { setShowNewRun(s => !s); setRunFormError(null) }} className="btn-primary flex items-center gap-1.5">
-          <Plus size={15} /> New Run
+          <Plus size={15} /> Start a Session
         </button>
       </div>
 
       {showNewRun && (
         <div className="card mb-4 border border-blue-200 bg-blue-50">
-          <h3 className="font-semibold text-gray-800 mb-3">Start New Packing Run</h3>
+          <h3 className="font-semibold text-gray-800 mb-1">Start a new packing session</h3>
+          <p className="text-sm text-gray-500 mb-4">Fill in what you're packing today. You'll log the actual units packed as you go, then close the session when done.</p>
           <form onSubmit={handleCreateRun} className="space-y-3">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Run name / reference <span className="text-gray-400 font-normal">(optional)</span></label>
-                <input type="text" className="input w-full" placeholder="e.g. ORD-2026-001 or Batch A" value={runForm.run_ref} onChange={e => setRunForm(f => ({ ...f, run_ref: e.target.value }))} />
+                <label className="block text-xs font-medium text-gray-700 mb-1">Session name <span className="text-gray-400 font-normal">(optional)</span></label>
+                <input type="text" className="input w-full" placeholder="e.g. Morning run — 25 Apr" value={runForm.run_ref} onChange={e => setRunForm(f => ({ ...f, run_ref: e.target.value }))} />
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">What bulk material are you packing? <span className="text-red-500">*</span></label>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Which raw material are you packing today? <span className="text-red-500">*</span></label>
                 <select className="input w-full" value={runForm.bulk_sku_id} onChange={e => setRunForm(f => ({ ...f, bulk_sku_id: e.target.value, landed_cost_id: '' }))} required>
-                  <option value="">Select bulk material…</option>
+                  <option value="">Select raw material…</option>
                   {skus.map(s => <option key={s.id} value={s.id}>{s.product_name} ({s.sku_code})</option>)}
                 </select>
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Weigh your bulk now — enter starting weight (kg) <span className="text-red-500">*</span></label>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Put your bulk on the scale — what does it weigh? (kg) <span className="text-red-500">*</span></label>
                 <input type="number" step="0.001" min="0.001" className="input w-full" placeholder="e.g. 1000" value={runForm.qty_start} onChange={e => setRunForm(f => ({ ...f, qty_start: e.target.value }))} required />
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">
-                  Which purchase did this bulk come from?
-                  <span className="ml-1 text-xs text-gray-400 font-normal">(optional — links cost/kg for accurate breakdown)</span>
+                  Which delivery is this bulk from?
+                  <span className="ml-1 text-xs text-gray-400 font-normal">(links to cost records — recommended)</span>
                 </label>
                 {runForm.bulk_sku_id && matchingLandedCosts.length === 0 ? (
                   <div className="text-xs text-amber-600 italic mt-1 flex items-center gap-1">
-                    <AlertTriangle size={12} /> No purchases recorded for this bulk SKU yet — go to the <strong>Purchases</strong> tab and add one first.
+                    <AlertTriangle size={12} /> No deliveries recorded for this material yet. Go to <strong>Stock Received</strong> and add one first to enable cost tracking.
                   </div>
                 ) : (
                   <select
@@ -2046,28 +2047,28 @@ function RunsTab({ skus, landedCosts }) {
                     onChange={e => setRunForm(f => ({ ...f, landed_cost_id: e.target.value }))}
                     disabled={!runForm.bulk_sku_id || matchingLandedCosts.length === 0}
                   >
-                    <option value="">Auto-pick most recent purchase for this SKU</option>
+                    <option value="">Use most recent delivery for this material</option>
                     {matchingLandedCosts.map(lc => (
                       <option key={lc.id} value={lc.id}>
-                        {lc.batch_ref || `Purchase #${lc.id}`} · {(+lc.qty_kg).toFixed(0)} kg · ${(+lc.cost_per_kg).toFixed(4)}/kg · {new Date(lc.created_at).toLocaleDateString()}
+                        {lc.batch_ref || `Delivery #${lc.id}`} · {(+lc.qty_kg).toFixed(0)} kg · ${(+lc.cost_per_kg).toFixed(4)}/kg · {new Date(lc.created_at).toLocaleDateString()}
                       </option>
                     ))}
                   </select>
                 )}
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Operator Name</label>
-                <input type="text" className="input w-full" placeholder="Who is running this pack?" value={runForm.started_by} onChange={e => setRunForm(f => ({ ...f, started_by: e.target.value }))} />
+                <label className="block text-xs font-medium text-gray-700 mb-1">Who is doing the packing?</label>
+                <input type="text" className="input w-full" placeholder="Operator name" value={runForm.started_by} onChange={e => setRunForm(f => ({ ...f, started_by: e.target.value }))} />
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Notes</label>
-                <input type="text" className="input w-full" placeholder="Optional notes…" value={runForm.notes} onChange={e => setRunForm(f => ({ ...f, notes: e.target.value }))} />
+                <label className="block text-xs font-medium text-gray-700 mb-1">How many units are you planning to pack?</label>
+                <input type="number" step="1" min="1" className="input w-full" placeholder="e.g. 250" value={runForm.units_planned} onChange={e => setRunForm(f => ({ ...f, units_planned: e.target.value }))} />
               </div>
             </div>
             {runFormError && <p className="text-sm text-red-600 flex items-center gap-1"><AlertTriangle size={14} /> {runFormError}</p>}
             <div className="flex gap-2">
               <button type="submit" className="btn-primary flex items-center gap-1.5" disabled={creatingRun}>
-                {creatingRun && <Loader2 size={14} className="animate-spin" />} Start Run
+                {creatingRun && <Loader2 size={14} className="animate-spin" />} Start Session
               </button>
               <button type="button" className="btn-secondary" onClick={() => setShowNewRun(false)}>Cancel</button>
             </div>
@@ -2082,27 +2083,27 @@ function RunsTab({ skus, landedCosts }) {
       ) : runs.length === 0 ? (
         <div className="card text-center py-12 text-gray-400">
           <Factory size={36} className="mx-auto mb-3 opacity-30" />
-          <p className="font-medium">No packing runs yet.</p>
-          <p className="text-sm mt-1">Start a new run to begin tracking bulk-to-retail packing.</p>
+          <p className="font-medium">No packing sessions yet.</p>
+          <p className="text-sm mt-1">When you're ready to pack, click "Start a Session". You'll weigh your bulk, log what you pack, then weigh what's left at the end.</p>
         </div>
       ) : (
         <div className="card p-0 overflow-hidden">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-xs text-gray-500 uppercase tracking-wide">
               <tr>
-                <th className="px-4 py-3 text-left">Run</th>
-                <th className="px-4 py-3 text-left">Bulk Material</th>
+                <th className="px-4 py-3 text-left">Session</th>
+                <th className="px-4 py-3 text-left">Raw Material</th>
                 <th className="px-4 py-3 text-left">Date</th>
                 <th className="px-4 py-3 text-left">Status</th>
-                <th className="px-4 py-3 text-right">Variance %</th>
-                <th className="px-4 py-3 text-right">Flag</th>
+                <th className="px-4 py-3 text-right">Difference %</th>
+                <th className="px-4 py-3 text-right">Alert</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {runs.map(r => (
                 <tr key={r.id} className="hover:bg-blue-50 cursor-pointer transition-colors" onClick={() => handleSelectRun(r)}>
                   <td className="px-4 py-3">
-                    <div className="font-medium text-gray-800">{r.run_ref || `Run #${r.id}`}</div>
+                    <div className="font-medium text-gray-800">{r.run_ref || `Session #${r.id}`}</div>
                     {r.started_by && <div className="text-xs text-gray-400">{r.started_by}</div>}
                   </td>
                   <td className="px-4 py-3 text-gray-600">
@@ -2224,14 +2225,14 @@ function SummaryTab() {
               <AlertTriangle size={20} className="text-red-600 flex-shrink-0 mt-0.5" />
               <div>
                 <p className="font-bold text-red-800 text-sm">
-                  {flaggedRuns.length} run{flaggedRuns.length > 1 ? 's' : ''} flagged for high variance — investigate immediately
+                  {flaggedRuns.length} packing session{flaggedRuns.length > 1 ? 's' : ''} used significantly more raw material than expected — please investigate
                 </p>
                 <ul className="mt-1.5 space-y-0.5">
                   {flaggedRuns.map(r => (
                     <li key={r.id} className="text-xs text-red-700">
-                      <strong>{r.run_ref || `Run #${r.id}`}</strong> — variance{' '}
-                      {r.variance_pct != null ? `${r.variance_pct >= 0 ? '+' : ''}${r.variance_pct.toFixed(1)}%` : '?'}
-                      {r.variance_kg != null ? ` (${r.variance_kg >= 0 ? '+' : ''}${r.variance_kg.toFixed(3)} kg unaccounted)` : ''}
+                      <strong>{r.run_ref || `Session #${r.id}`}</strong> — used{' '}
+                      {r.variance_pct != null ? `${Math.abs(r.variance_pct).toFixed(1)}% more bulk than expected` : 'unknown amount'}
+                      {r.variance_kg != null ? ` (${Math.abs(r.variance_kg).toFixed(3)} kg unaccounted for)` : ''}
                     </li>
                   ))}
                 </ul>
@@ -2243,26 +2244,26 @@ function SummaryTab() {
           {summary.closed_runs > 0 && (
             <div>
               <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
-                <DollarSign size={16} className="text-green-600" /> Cost Overview
+                <DollarSign size={16} className="text-green-600" /> Cost per Box — by Session
               </h3>
               {costsLoading ? (
                 <div className="card flex justify-center py-6"><Loader2 className="animate-spin text-blue-500" size={20} /></div>
               ) : closedRunsWithCost.length === 0 ? (
                 <div className="card text-sm text-gray-500 py-4 text-center">
-                  No cost data yet. Add landed costs and packing run costs to see a cost overview.
+                  No cost data yet. Record your deliveries in <strong>Stock Received</strong> and log session costs in <strong>Packing Sessions</strong> to see cost per box.
                 </div>
               ) : (
                 <div className="card p-0 overflow-hidden">
                   <table className="w-full text-sm">
                     <thead className="bg-gray-50 text-xs text-gray-500 uppercase tracking-wide">
                       <tr>
-                        <th className="px-4 py-3 text-left">Run</th>
-                        <th className="px-4 py-3 text-left">Batch Ref</th>
-                        <th className="px-4 py-3 text-right">Total Cases</th>
-                        <th className="px-4 py-3 text-right">Bulk Material</th>
-                        <th className="px-4 py-3 text-right">Packing Costs</th>
-                        <th className="px-4 py-3 text-right font-bold text-gray-700">Grand Total</th>
-                        <th className="px-4 py-3 text-right font-bold text-gray-700">Avg Cost/Case</th>
+                        <th className="px-4 py-3 text-left">Session</th>
+                        <th className="px-4 py-3 text-left">Delivery Ref</th>
+                        <th className="px-4 py-3 text-right">Total Boxes</th>
+                        <th className="px-4 py-3 text-right">Raw Material Cost</th>
+                        <th className="px-4 py-3 text-right">Packing Cost</th>
+                        <th className="px-4 py-3 text-right font-bold text-gray-700">Total Cost</th>
+                        <th className="px-4 py-3 text-right font-bold text-gray-700">Cost per Box</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
@@ -2270,7 +2271,7 @@ function SummaryTab() {
                         const cs = costData[r.id]
                         return (
                           <tr key={r.id} className="hover:bg-gray-50">
-                            <td className="px-4 py-3 font-medium text-gray-800">{r.run_ref || `Run #${r.id}`}</td>
+                            <td className="px-4 py-3 font-medium text-gray-800">{r.run_ref || `Session #${r.id}`}</td>
                             <td className="px-4 py-3 text-gray-500">{cs?.landed_cost_ref || '—'}</td>
                             <td className="px-4 py-3 text-right">{cs?.total_cases ?? '—'}</td>
                             <td className="px-4 py-3 text-right font-mono">{cs ? fmt$(cs.bulk_material_cost) : '—'}</td>
@@ -2291,50 +2292,50 @@ function SummaryTab() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div className="card text-center">
               <div className="text-3xl font-bold text-gray-800">{summary.total_runs}</div>
-              <div className="text-sm text-gray-500 mt-1">Total Runs</div>
+              <div className="text-sm text-gray-500 mt-1">Total Sessions</div>
             </div>
             <div className="card text-center">
               <div className={`text-3xl font-bold ${summary.total_variance_kg > 0 ? 'text-red-600' : summary.total_variance_kg < 0 ? 'text-green-600' : 'text-gray-800'}`}>
                 {summary.total_variance_kg >= 0 ? '+' : ''}{summary.total_variance_kg.toFixed(2)} kg
               </div>
-              <div className="text-sm text-gray-500 mt-1">Total Variance</div>
+              <div className="text-sm text-gray-500 mt-1">Total Unexplained (kg)</div>
             </div>
             <div className="card text-center">
               <div className={`text-3xl font-bold ${varianceColor(summary.avg_variance_pct)}`}>
                 {summary.avg_variance_pct >= 0 ? '+' : ''}{summary.avg_variance_pct.toFixed(1)}%
               </div>
-              <div className="text-sm text-gray-500 mt-1">Avg Variance %</div>
+              <div className="text-sm text-gray-500 mt-1">Avg Difference %</div>
             </div>
             <div className="card text-center">
               <div className={`text-3xl font-bold ${summary.flagged_runs > 0 ? 'text-red-600' : 'text-green-600'}`}>
                 {summary.flagged_runs}
               </div>
-              <div className="text-sm text-gray-500 mt-1">Flagged Runs</div>
+              <div className="text-sm text-gray-500 mt-1">Sessions to Investigate</div>
             </div>
           </div>
 
           {/* Worst runs */}
           {summary.worst_runs.length > 0 && (
             <div>
-              <h3 className="font-semibold text-gray-800 mb-3">Closed Runs — Sorted by Worst Variance</h3>
+              <h3 className="font-semibold text-gray-800 mb-3">All Closed Sessions — Sorted by Largest Difference</h3>
               <div className="card p-0 overflow-hidden">
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 text-xs text-gray-500 uppercase tracking-wide">
                     <tr>
-                      <th className="px-4 py-3 text-left">Run</th>
-                      <th className="px-4 py-3 text-left">Bulk Material</th>
-                      <th className="px-4 py-3 text-left">Closed</th>
-                      <th className="px-4 py-3 text-right">Theoretical kg</th>
-                      <th className="px-4 py-3 text-right">Actual kg</th>
-                      <th className="px-4 py-3 text-right">Variance kg</th>
-                      <th className="px-4 py-3 text-right">Variance %</th>
-                      <th className="px-4 py-3 text-center">Flag</th>
+                      <th className="px-4 py-3 text-left">Session</th>
+                      <th className="px-4 py-3 text-left">Raw Material</th>
+                      <th className="px-4 py-3 text-left">Date Closed</th>
+                      <th className="px-4 py-3 text-right">Expected Usage</th>
+                      <th className="px-4 py-3 text-right">Actual Usage</th>
+                      <th className="px-4 py-3 text-right">Difference</th>
+                      <th className="px-4 py-3 text-right">Diff %</th>
+                      <th className="px-4 py-3 text-center">Result</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
                     {summary.worst_runs.map(r => (
                       <tr key={r.id} className={r.flag_high_variance ? 'bg-red-50' : ''}>
-                        <td className="px-4 py-3 font-medium text-gray-800">{r.run_ref || `Run #${r.id}`}</td>
+                        <td className="px-4 py-3 font-medium text-gray-800">{r.run_ref || `Session #${r.id}`}</td>
                         <td className="px-4 py-3 text-gray-500 text-xs">
                           {r.bulk_sku_names?.length > 0 ? r.bulk_sku_names.join(' + ') : '—'}
                         </td>
@@ -2347,7 +2348,7 @@ function SummaryTab() {
                         <td className="px-4 py-3 text-right"><VarianceBadge pct={r.variance_pct} /></td>
                         <td className="px-4 py-3 text-center">
                           {r.flag_high_variance
-                            ? <span className="flex items-center justify-center gap-1 text-xs text-red-700 font-semibold"><AlertTriangle size={13} /> HIGH VARIANCE</span>
+                            ? <span className="flex items-center justify-center gap-1 text-xs text-red-700 font-semibold"><AlertTriangle size={13} /> Investigate</span>
                             : <span className="text-green-500"><CheckCircle2 size={14} /></span>
                           }
                         </td>
@@ -2362,16 +2363,16 @@ function SummaryTab() {
           {/* Breakdown by bulk SKU */}
           {summary.sku_breakdown.length > 0 && (
             <div>
-              <h3 className="font-semibold text-gray-800 mb-3">Breakdown by Bulk SKU</h3>
+              <h3 className="font-semibold text-gray-800 mb-3">Usage by Raw Material</h3>
               <div className="card p-0 overflow-hidden">
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 text-xs text-gray-500 uppercase tracking-wide">
                     <tr>
-                      <th className="px-4 py-3 text-left">Bulk SKU</th>
-                      <th className="px-4 py-3 text-right">Runs</th>
-                      <th className="px-4 py-3 text-right">Total Theoretical (kg)</th>
-                      <th className="px-4 py-3 text-right">Total Actual (kg)</th>
-                      <th className="px-4 py-3 text-right">Total Variance (kg)</th>
+                      <th className="px-4 py-3 text-left">Raw Material</th>
+                      <th className="px-4 py-3 text-right">Sessions</th>
+                      <th className="px-4 py-3 text-right">Expected Usage (kg)</th>
+                      <th className="px-4 py-3 text-right">Actual Usage (kg)</th>
+                      <th className="px-4 py-3 text-right">Difference (kg)</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
@@ -2395,8 +2396,8 @@ function SummaryTab() {
           {summary.closed_runs === 0 && (
             <div className="card text-center py-12 text-gray-400">
               <Factory size={36} className="mx-auto mb-3 opacity-30" />
-              <p className="font-medium">No closed runs yet{(fromDate || toDate) ? ' in this date range' : ''}.</p>
-              <p className="text-sm mt-1">Summary statistics will appear once runs are completed.</p>
+              <p className="font-medium">No closed sessions yet{(fromDate || toDate) ? ' in this date range' : ''}.</p>
+              <p className="text-sm mt-1">Audit data will appear here once you complete and close packing sessions.</p>
             </div>
           )}
         </>
@@ -2406,7 +2407,7 @@ function SummaryTab() {
 }
 
 // ── Main Repacking page ───────────────────────────────────────
-const TABS = ['Bill of Materials', 'Purchases', 'Packing Runs', 'Summary']
+const TABS = ['My Products', 'Stock Received', 'Packing Sessions', 'Audit Report']
 
 export default function Repacking() {
   const [activeTab, setActiveTab]       = useState(2)
@@ -2456,10 +2457,10 @@ export default function Repacking() {
       <div className="mb-6">
         <div className="flex items-center gap-2 mb-1">
           <Factory size={22} className="text-blue-600" />
-          <h1 className="text-2xl font-bold text-gray-900">Repacking / Production</h1>
+          <h1 className="text-2xl font-bold text-gray-900">Production</h1>
         </div>
         <p className="text-sm text-gray-500">
-          Track bulk-to-retail repacking, calculate material consumption, flag variance, and audit true cost per case.
+          Record what you bought, what you packed, and what it cost — all in one place.
         </p>
       </div>
 
@@ -2468,8 +2469,8 @@ export default function Repacking() {
         <div className="mb-4 flex items-center gap-3 bg-red-50 border border-red-300 rounded-xl px-4 py-3">
           <AlertTriangle size={18} className="text-red-600 flex-shrink-0" />
           <p className="text-sm text-red-800 font-medium flex-1">
-            <strong>{flaggedCount} packing run{flaggedCount > 1 ? 's' : ''}</strong> flagged for high variance.
-            Check the <button onClick={() => setActiveTab(3)} className="underline font-bold">Summary tab</button> to investigate.
+            <strong>{flaggedCount} packing session{flaggedCount > 1 ? 's' : ''}</strong> used more bulk material than expected — something may need checking.
+            Go to the <button onClick={() => setActiveTab(3)} className="underline font-bold">Audit Report</button> to review.
           </p>
         </div>
       )}
