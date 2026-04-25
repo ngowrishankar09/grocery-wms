@@ -34,6 +34,8 @@ class SKUCreate(BaseModel):
     floor_price: Optional[float] = None
     show_goods_date_on_picking: bool = False
     require_expiry_entry: bool = False
+    unit_weight: Optional[float] = None
+    unit_weight_uom: Optional[str] = "g"
 
 class SKUUpdate(BaseModel):
     barcode: Optional[str] = None
@@ -55,6 +57,8 @@ class SKUUpdate(BaseModel):
     floor_price: Optional[float] = None
     show_goods_date_on_picking: Optional[bool] = None
     require_expiry_entry: Optional[bool] = None
+    unit_weight: Optional[float] = None
+    unit_weight_uom: Optional[str] = None
 
 # ─── Endpoints ────────────────────────────────────────────────
 @router.get("/")
@@ -106,6 +110,8 @@ def list_skus(
             "floor_price": getattr(sku, 'floor_price', None),
             "show_goods_date_on_picking": getattr(sku, 'show_goods_date_on_picking', False),
             "require_expiry_entry": getattr(sku, 'require_expiry_entry', False),
+            "unit_weight": getattr(sku, 'unit_weight', None),
+            "unit_weight_uom": getattr(sku, 'unit_weight_uom', 'g') or 'g',
             "image_url": sku.image_url,
             "is_active": sku.is_active,
             "wh1_cases": wh1,

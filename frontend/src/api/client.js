@@ -496,6 +496,16 @@ export const repackingAPI = {
   // Run costs
   getRunCosts:     (runId)    => api.get(`/repacking/runs/${runId}/costs`),
   saveRunCosts:    (runId, d) => api.post(`/repacking/runs/${runId}/costs`, d),
+  // Multi-currency run cost lines (new)
+  getRunCostLines:    (runId)    => api.get(`/repacking/runs/${runId}/cost-lines`),
+  saveRunCostLines:   (runId, d) => api.post(`/repacking/runs/${runId}/cost-lines`, d),
+  // Multi-currency shipment cost lines (new)
+  getShipmentCostLines:    (batchId)       => api.get(`/repacking/purchases/${batchId}/cost-lines`),
+  addShipmentCostLine:     (batchId, data) => api.post(`/repacking/purchases/${batchId}/cost-lines`, data),
+  updateShipmentCostLine:  (batchId, lineId, data) => api.put(`/repacking/purchases/${batchId}/cost-lines/${lineId}`, data),
+  deleteShipmentCostLine:  (batchId, lineId) => api.delete(`/repacking/purchases/${batchId}/cost-lines/${lineId}`),
+  // Live FX rate
+  getFxRate:  (fromCurrency) => api.get(`/repacking/fx-rate/${fromCurrency}`),
   // Cost summary
   costSummary:     (runId)    => api.get(`/repacking/runs/${runId}/cost-summary`),
 }

@@ -12,11 +12,12 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime, date
+import httpx
 
 import sys, os
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from database import get_db
-from models import BillOfMaterial, PackingRun, PackingRunOutput, PackingRunBulk, SKU, LandedCost, PackingRunCost, LandedCostBatch
+from models import BillOfMaterial, PackingRun, PackingRunOutput, PackingRunBulk, SKU, LandedCost, PackingRunCost, LandedCostBatch, ShipmentCostLine, RunCostLine
 from security import get_current_user, get_company_id
 
 router = APIRouter(prefix="/repacking", tags=["Repacking"])
@@ -39,10 +40,13 @@ class RunIn(BaseModel):
     started_by:     Optional[str] = None
     notes:          Optional[str] = None
     landed_cost_id: Optional[int] = None   # link a specific landed-cost batch
+    units_planned:  Optional[int] = None   # target units to pack this run
 
 class OutputIn(BaseModel):
-    sku_id:     int
-    qty_packed: float
+    sku_id:        int
+    qty_packed:    float              # cases (kept for backward compat)
+    units_packed:  Optional[int] = None   # actual units packed (new)
+    units_planned: Optional[int] = None   # target units for this SKU (new)
 
 class CloseIn(BaseModel):
     # List of {bulk_sku_id, qty_end} for each bulk entry in this run
@@ -73,6 +77,16 @@ class PackingRunCostIn(BaseModel):
 
 # ── Purchase / Shipment schemas ──────────────────────────────────
 
+class CostLineIn(BaseModel):
+    """One multi-currency cost line (used for both shipment and run cost lines)."""
+    description:    str
+    amount:         float = 0.0
+    currency:       str   = "USD"   # USD | INR | GBP | EUR | PKR
+    fx_rate_to_usd: float = 1.0
+    sort_order:     int   = 0
+    sku_id:         Optional[int] = None  # for shipment lines: which SKU this applies to (None = shared)
+
+
 class PurchaseLineIn(BaseModel):
     """One product line inside a multi-SKU purchase."""
     bulk_sku_id:       int
@@ -83,17 +97,19 @@ class PurchaseLineIn(BaseModel):
 
 class PurchaseBatchIn(BaseModel):
     """Header for a whole shipment.  Shared costs auto-split by weight across lines."""
-    batch_ref:       Optional[str]  = None
-    supplier:        Optional[str]  = None
-    currency:        str            = "USD"
-    purchase_date:   Optional[date] = None   # date goods were purchased / invoiced
-    exchange_rate:   float          = 1.0    # FX rate: 1 foreign unit → 1 base unit (e.g. 1 INR → 0.012 USD)
-    shared_freight:  float          = 0.0
-    shared_duty:     float          = 0.0
-    shared_overhead: float          = 0.0
-    shared_other:    float          = 0.0
-    notes:           Optional[str]  = None
-    lines:           List[PurchaseLineIn]
+    batch_ref:        Optional[str]  = None
+    supplier:         Optional[str]  = None
+    supplier_country: Optional[str]  = None
+    currency:         str            = "USD"
+    purchase_date:    Optional[date] = None   # date goods were purchased / invoiced
+    exchange_rate:    float          = 1.0    # FX rate: 1 foreign unit → 1 base unit (e.g. 1 INR → 0.012 USD)
+    shared_freight:   float          = 0.0
+    shared_duty:      float          = 0.0
+    shared_overhead:  float          = 0.0
+    shared_other:     float          = 0.0
+    notes:            Optional[str]  = None
+    lines:            List[PurchaseLineIn]
+    cost_lines:       List[CostLineIn] = []   # new multi-currency cost lines
 
 
 class BulkAddIn(BaseModel):
@@ -125,6 +141,7 @@ def _fmt_run(run: PackingRun, db: Session) -> dict:
         "id":                run.id,
         "run_ref":           run.run_ref,
         "status":            run.status,
+        "units_planned":     getattr(run, 'units_planned', None),
         "landed_cost_id":    getattr(run, 'landed_cost_id', None),
         "linked_batch_ref":  linked_lc.batch_ref if linked_lc else None,
         "linked_cost_per_kg": linked_lc.cost_per_kg if linked_lc else None,
@@ -144,6 +161,14 @@ def _fmt_run(run: PackingRun, db: Session) -> dict:
                 "sku_code":      _sku_code(db, o.sku_id),
                 "product_name":  _sku_name(db, o.sku_id),
                 "qty_packed":    o.qty_packed,
+                "units_packed":  getattr(o, 'units_packed', None),
+                "units_planned": getattr(o, 'units_planned', None),
+                "shortage_units": (
+                    (getattr(o, 'units_planned', None) or 0) - (getattr(o, 'units_packed', None) or 0)
+                    if (getattr(o, 'units_planned', None) is not None and getattr(o, 'units_packed', None) is not None
+                        and (getattr(o, 'units_planned', None) or 0) > (getattr(o, 'units_packed', None) or 0))
+                    else 0
+                ),
                 "theoretical_kg": o.theoretical_kg,
                 # Include BOM rate so frontend can show live expected-remaining
                 # before the run is closed (theoretical_kg is only set at close time)
@@ -178,6 +203,201 @@ def _fmt_run(run: PackingRun, db: Session) -> dict:
             for b in bulk_entries
         ],
     }
+
+
+# ── Cost line helpers ─────────────────────────────────────────────
+
+def _save_shipment_cost_lines(db: Session, batch_id: int, lines: List[CostLineIn]):
+    """Delete existing cost lines for this batch and replace with new ones."""
+    db.query(ShipmentCostLine).filter(ShipmentCostLine.purchase_batch_id == batch_id).delete()
+    for i, line in enumerate(lines):
+        cl = ShipmentCostLine(
+            purchase_batch_id = batch_id,
+            sku_id            = line.sku_id,
+            description       = line.description,
+            amount            = line.amount,
+            currency          = line.currency,
+            fx_rate_to_usd    = line.fx_rate_to_usd,
+            sort_order        = line.sort_order if line.sort_order else i,
+        )
+        db.add(cl)
+
+
+def _save_run_cost_lines(db: Session, run_id: int, lines: List[CostLineIn]):
+    """Delete existing run cost lines and replace with new ones."""
+    db.query(RunCostLine).filter(RunCostLine.run_id == run_id).delete()
+    for i, line in enumerate(lines):
+        cl = RunCostLine(
+            run_id         = run_id,
+            description    = line.description,
+            amount         = line.amount,
+            currency       = line.currency,
+            fx_rate_to_usd = line.fx_rate_to_usd,
+            sort_order     = line.sort_order if line.sort_order else i,
+        )
+        db.add(cl)
+
+
+# ── FX Rate endpoint ──────────────────────────────────────────────
+
+@router.get("/fx-rate/{from_currency}")
+async def get_fx_rate(from_currency: str):
+    """Fetch live exchange rate: 1 unit of from_currency → how many USD."""
+    from_currency = from_currency.upper()
+    if from_currency == "USD":
+        return {"from": "USD", "to": "USD", "rate": 1.0}
+    try:
+        async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
+            r = await client.get(
+                "https://api.frankfurter.app/latest",
+                params={"from": from_currency, "to": "USD"},
+            )
+            if r.status_code == 404:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"{from_currency} is not supported by the live FX service — please enter the rate manually",
+                )
+            r.raise_for_status()
+            data = r.json()
+            rate = data.get("rates", {}).get("USD")
+            if rate is None:
+                raise HTTPException(status_code=400, detail=f"Could not fetch rate for {from_currency}")
+            return {"from": from_currency, "to": "USD", "rate": round(rate, 8)}
+    except HTTPException:
+        raise
+    except httpx.RequestError:
+        raise HTTPException(status_code=503, detail="FX rate service unavailable")
+
+
+# ── Shipment cost line endpoints ──────────────────────────────────
+
+@router.get("/purchases/{batch_id}/cost-lines")
+def list_shipment_cost_lines(
+    batch_id:   int,
+    db:         Session = Depends(get_db),
+    company_id: int     = Depends(get_company_id),
+):
+    batch = db.query(LandedCostBatch).filter(
+        LandedCostBatch.id == batch_id,
+        LandedCostBatch.company_id == company_id,
+    ).first()
+    if not batch:
+        raise HTTPException(status_code=404, detail="Purchase not found")
+    lines = db.query(ShipmentCostLine).filter(
+        ShipmentCostLine.purchase_batch_id == batch_id
+    ).order_by(ShipmentCostLine.sort_order).all()
+    return [_fmt_cost_line(cl) for cl in lines]
+
+
+@router.post("/purchases/{batch_id}/cost-lines", status_code=201)
+def add_shipment_cost_line(
+    batch_id:   int,
+    body:       CostLineIn,
+    db:         Session = Depends(get_db),
+    company_id: int     = Depends(get_company_id),
+):
+    batch = db.query(LandedCostBatch).filter(
+        LandedCostBatch.id == batch_id,
+        LandedCostBatch.company_id == company_id,
+    ).first()
+    if not batch:
+        raise HTTPException(status_code=404, detail="Purchase not found")
+    cl = ShipmentCostLine(
+        purchase_batch_id = batch_id,
+        sku_id            = body.sku_id,
+        description       = body.description,
+        amount            = body.amount,
+        currency          = body.currency,
+        fx_rate_to_usd    = body.fx_rate_to_usd,
+        sort_order        = body.sort_order,
+    )
+    db.add(cl)
+    db.commit()
+    db.refresh(cl)
+    return _fmt_cost_line(cl)
+
+
+@router.put("/purchases/{batch_id}/cost-lines/{line_id}")
+def update_shipment_cost_line(
+    batch_id:   int,
+    line_id:    int,
+    body:       CostLineIn,
+    db:         Session = Depends(get_db),
+    company_id: int     = Depends(get_company_id),
+):
+    cl = db.query(ShipmentCostLine).filter(
+        ShipmentCostLine.id == line_id,
+        ShipmentCostLine.purchase_batch_id == batch_id,
+    ).first()
+    if not cl:
+        raise HTTPException(status_code=404, detail="Cost line not found")
+    cl.description    = body.description
+    cl.amount         = body.amount
+    cl.currency       = body.currency
+    cl.fx_rate_to_usd = body.fx_rate_to_usd
+    cl.sort_order     = body.sort_order
+    cl.sku_id         = body.sku_id
+    db.commit()
+    db.refresh(cl)
+    return _fmt_cost_line(cl)
+
+
+@router.delete("/purchases/{batch_id}/cost-lines/{line_id}", status_code=204)
+def delete_shipment_cost_line(
+    batch_id:   int,
+    line_id:    int,
+    db:         Session = Depends(get_db),
+    company_id: int     = Depends(get_company_id),
+):
+    cl = db.query(ShipmentCostLine).filter(
+        ShipmentCostLine.id == line_id,
+        ShipmentCostLine.purchase_batch_id == batch_id,
+    ).first()
+    if not cl:
+        raise HTTPException(status_code=404, detail="Cost line not found")
+    db.delete(cl)
+    db.commit()
+    return None
+
+
+# ── Run cost line endpoints ───────────────────────────────────────
+
+@router.get("/runs/{run_id}/cost-lines")
+def list_run_cost_lines(
+    run_id:     int,
+    db:         Session = Depends(get_db),
+    company_id: int     = Depends(get_company_id),
+):
+    run = db.query(PackingRun).filter(
+        PackingRun.id == run_id,
+        PackingRun.company_id == company_id,
+    ).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    lines = db.query(RunCostLine).filter(
+        RunCostLine.run_id == run_id
+    ).order_by(RunCostLine.sort_order).all()
+    return [_fmt_cost_line(cl) for cl in lines]
+
+
+@router.post("/runs/{run_id}/cost-lines", status_code=201)
+def save_run_cost_lines(
+    run_id:     int,
+    body:       List[CostLineIn],
+    db:         Session = Depends(get_db),
+    company_id: int     = Depends(get_company_id),
+):
+    """Replace all run cost lines (send the full list)."""
+    run = db.query(PackingRun).filter(
+        PackingRun.id == run_id,
+        PackingRun.company_id == company_id,
+    ).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    _save_run_cost_lines(db, run_id, body)
+    db.commit()
+    lines = db.query(RunCostLine).filter(RunCostLine.run_id == run_id).order_by(RunCostLine.sort_order).all()
+    return [_fmt_cost_line(cl) for cl in lines]
 
 
 # ── BOM endpoints ────────────────────────────────────────────────
@@ -370,6 +590,7 @@ def create_run(
         started_by     = body.started_by,
         notes          = body.notes,
         landed_cost_id = body.landed_cost_id,
+        units_planned  = body.units_planned,
     )
     db.add(run)
     db.flush()
@@ -427,26 +648,39 @@ def add_output(
     ).first()
 
     if existing:
-        existing.qty_packed = body.qty_packed
+        existing.qty_packed    = body.qty_packed
+        existing.units_packed  = body.units_packed
+        existing.units_planned = body.units_planned
         db.commit()
         db.refresh(existing)
         out = existing
     else:
         out = PackingRunOutput(
-            run_id     = run_id,
-            sku_id     = body.sku_id,
-            qty_packed = body.qty_packed,
+            run_id       = run_id,
+            sku_id       = body.sku_id,
+            qty_packed   = body.qty_packed,
+            units_packed  = body.units_packed,
+            units_planned = body.units_planned,
         )
         db.add(out)
         db.commit()
         db.refresh(out)
 
+    shortage = 0
+    if (getattr(out, 'units_planned', None) is not None and
+        getattr(out, 'units_packed', None) is not None and
+        out.units_planned > out.units_packed):
+        shortage = out.units_planned - out.units_packed
+
     return {
-        "id":           out.id,
-        "run_id":       out.run_id,
-        "sku_id":       out.sku_id,
-        "product_name": _sku_name(db, out.sku_id),
-        "qty_packed":   out.qty_packed,
+        "id":             out.id,
+        "run_id":         out.run_id,
+        "sku_id":         out.sku_id,
+        "product_name":   _sku_name(db, out.sku_id),
+        "qty_packed":     out.qty_packed,
+        "units_packed":   getattr(out, 'units_packed', None),
+        "units_planned":  getattr(out, 'units_planned', None),
+        "shortage_units": shortage,
         "theoretical_kg": out.theoretical_kg,
     }
 
@@ -791,26 +1025,45 @@ def _allocate_and_save_lines(
     return results
 
 
+def _fmt_cost_line(cl) -> dict:
+    usd_eq = round((cl.amount or 0.0) * (cl.fx_rate_to_usd or 1.0), 4)
+    return {
+        "id":             cl.id,
+        "description":    cl.description,
+        "amount":         cl.amount,
+        "currency":       cl.currency,
+        "fx_rate_to_usd": cl.fx_rate_to_usd,
+        "usd_equivalent": usd_eq,
+        "sort_order":     cl.sort_order,
+        "sku_id":         getattr(cl, 'sku_id', None),
+    }
+
 def _fmt_batch(batch: LandedCostBatch, db: Session) -> dict:
     items = db.query(LandedCost).filter(LandedCost.purchase_batch_id == batch.id).all()
+    cost_lines = db.query(ShipmentCostLine).filter(ShipmentCostLine.purchase_batch_id == batch.id).order_by(ShipmentCostLine.sort_order).all()
     total_kg   = sum(i.qty_kg or 0   for i in items)
     total_cost = sum(i.total_cost or 0 for i in items)
+    # Also compute total from new cost lines for display
+    total_cost_lines_usd = sum((cl.amount or 0.0) * (cl.fx_rate_to_usd or 1.0) for cl in cost_lines)
     return {
-        "id":             batch.id,
-        "batch_ref":      batch.batch_ref,
-        "supplier":       batch.supplier,
-        "currency":       batch.currency,
-        "purchase_date":  batch.purchase_date.isoformat() if getattr(batch, "purchase_date", None) else None,
-        "exchange_rate":  getattr(batch, "exchange_rate", 1.0) or 1.0,
-        "shared_freight": batch.shared_freight,
-        "shared_duty":    batch.shared_duty,
-        "shared_overhead": batch.shared_overhead,
-        "shared_other":   batch.shared_other,
-        "notes":          batch.notes,
-        "created_at":     batch.created_at.isoformat() if batch.created_at else None,
-        "total_kg":       round(total_kg, 3),
-        "total_cost":     round(total_cost, 4),
-        "items": [_fmt_landed(i, db) for i in items],
+        "id":               batch.id,
+        "batch_ref":        batch.batch_ref,
+        "supplier":         batch.supplier,
+        "supplier_country": getattr(batch, 'supplier_country', None),
+        "currency":         batch.currency,
+        "purchase_date":    batch.purchase_date.isoformat() if getattr(batch, "purchase_date", None) else None,
+        "exchange_rate":    getattr(batch, "exchange_rate", 1.0) or 1.0,
+        "shared_freight":   batch.shared_freight,
+        "shared_duty":      batch.shared_duty,
+        "shared_overhead":  batch.shared_overhead,
+        "shared_other":     batch.shared_other,
+        "notes":            batch.notes,
+        "created_at":       batch.created_at.isoformat() if batch.created_at else None,
+        "total_kg":         round(total_kg, 3),
+        "total_cost":       round(total_cost, 4),
+        "total_cost_lines_usd": round(total_cost_lines_usd, 4),
+        "cost_lines":       [_fmt_cost_line(cl) for cl in cost_lines],
+        "items":            [_fmt_landed(i, db) for i in items],
     }
 
 
@@ -991,22 +1244,25 @@ def create_purchase(
         seen_skus.add(line.bulk_sku_id)
 
     batch = LandedCostBatch(
-        company_id      = company_id,
-        batch_ref       = body.batch_ref,
-        supplier        = body.supplier,
-        currency        = body.currency,
-        purchase_date   = body.purchase_date,
-        exchange_rate   = body.exchange_rate if body.exchange_rate and body.exchange_rate > 0 else 1.0,
-        shared_freight  = body.shared_freight,
-        shared_duty     = body.shared_duty,
-        shared_overhead = body.shared_overhead,
-        shared_other    = body.shared_other,
-        notes           = body.notes,
+        company_id       = company_id,
+        batch_ref        = body.batch_ref,
+        supplier         = body.supplier,
+        supplier_country = body.supplier_country,
+        currency         = body.currency,
+        purchase_date    = body.purchase_date,
+        exchange_rate    = body.exchange_rate if body.exchange_rate and body.exchange_rate > 0 else 1.0,
+        shared_freight   = body.shared_freight,
+        shared_duty      = body.shared_duty,
+        shared_overhead  = body.shared_overhead,
+        shared_other     = body.shared_other,
+        notes            = body.notes,
     )
     db.add(batch)
     db.flush()   # get batch.id
 
     _allocate_and_save_lines(db, batch, body.lines, company_id)
+    # Save new multi-currency cost lines
+    _save_shipment_cost_lines(db, batch.id, body.cost_lines)
     db.commit()
     db.refresh(batch)
     return _fmt_batch(batch, db)
@@ -1052,19 +1308,22 @@ def update_purchase(
         seen_skus.add(line.bulk_sku_id)
 
     # Update header
-    batch.batch_ref       = body.batch_ref
-    batch.supplier        = body.supplier
-    batch.currency        = body.currency
-    batch.purchase_date   = body.purchase_date
-    batch.exchange_rate   = body.exchange_rate if body.exchange_rate and body.exchange_rate > 0 else 1.0
-    batch.shared_freight  = body.shared_freight
-    batch.shared_duty     = body.shared_duty
-    batch.shared_overhead = body.shared_overhead
-    batch.shared_other    = body.shared_other
-    batch.notes           = body.notes
+    batch.batch_ref        = body.batch_ref
+    batch.supplier         = body.supplier
+    batch.supplier_country = body.supplier_country
+    batch.currency         = body.currency
+    batch.purchase_date    = body.purchase_date
+    batch.exchange_rate    = body.exchange_rate if body.exchange_rate and body.exchange_rate > 0 else 1.0
+    batch.shared_freight   = body.shared_freight
+    batch.shared_duty      = body.shared_duty
+    batch.shared_overhead  = body.shared_overhead
+    batch.shared_other     = body.shared_other
+    batch.notes            = body.notes
 
     # Upsert lines in-place (preserves LandedCost IDs → run FK links stay valid)
     _allocate_and_save_lines(db, batch, body.lines, company_id)
+    # Replace cost lines
+    _save_shipment_cost_lines(db, batch.id, body.cost_lines)
     db.commit()
     db.refresh(batch)
     return _fmt_batch(batch, db)
@@ -1404,21 +1663,25 @@ def get_cost_summary(
     cost_per_kg = cpk_by_bulk_sku.get(first_bulk_sku_id, 0.0) if first_bulk_sku_id else 0.0
     first_lc = lc_info_by_bulk_sku.get(first_bulk_sku_id) if first_bulk_sku_id else None
 
-    # Get PackingRunCost for this run
-    run_cost = db.query(PackingRunCost).filter(PackingRunCost.run_id == run_id).first()
+    # Get PackingRunCost (legacy) + new RunCostLine (multi-currency)
+    run_cost  = db.query(PackingRunCost).filter(PackingRunCost.run_id == run_id).first()
+    run_cost_lines = db.query(RunCostLine).filter(RunCostLine.run_id == run_id).order_by(RunCostLine.sort_order).all()
 
     # Compute total cases and per-output data
     total_cases = sum(o.qty_packed for o in outputs)
     total_theoretical_kg = 0.0
     per_output = []
 
-    # Packing run costs
+    # Packing run costs (legacy buckets)
     packing_pkg   = run_cost.cost_packaging_mat if run_cost else 0.0
     packing_labor = run_cost.cost_labor         if run_cost else 0.0
     packing_oh    = run_cost.cost_overhead      if run_cost else 0.0
     packing_other = run_cost.cost_other         if run_cost else 0.0
     labor_hours   = run_cost.labor_hours        if run_cost else None
-    packing_total = packing_pkg + packing_labor + packing_oh + packing_other
+    legacy_packing_total = packing_pkg + packing_labor + packing_oh + packing_other
+    # New multi-currency run cost lines total (in USD)
+    new_cost_lines_usd = sum((cl.amount or 0.0) * (cl.fx_rate_to_usd or 1.0) for cl in run_cost_lines)
+    packing_total = legacy_packing_total + new_cost_lines_usd
 
     packing_cost_per_case = (packing_total / total_cases) if total_cases > 0 else 0.0
 
@@ -1494,6 +1757,8 @@ def get_cost_summary(
             "cost_other":         packing_other,
             "labor_hours":        labor_hours,
             "total":              round(packing_total, 4),
+            "cost_lines":         [_fmt_cost_line(cl) for cl in run_cost_lines],
+            "cost_lines_usd":     round(new_cost_lines_usd, 4),
         },
         "packing_cost_per_case":      round(packing_cost_per_case, 4),
         "total_cases":                total_cases,

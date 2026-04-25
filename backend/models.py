@@ -91,6 +91,8 @@ class SKU(Base):
     vendor_id       = Column(Integer, ForeignKey("vendors.id"), nullable=True)
     cost_price      = Column(Float, nullable=True)          # default cost per case (from vendor)
     selling_price   = Column(Float, nullable=True)          # default customer-facing price per case
+    unit_weight     = Column(Float, nullable=True)          # weight per single unit (in unit_weight_uom)
+    unit_weight_uom = Column(String(5), default="g")        # g | oz | lbs | kg | ml | l
     image_url       = Column(String, nullable=True)         # product image path
     show_goods_date_on_picking = Column(Boolean, default=False)  # show expiry/goods date to picker
     require_expiry_entry       = Column(Boolean, default=False)  # picker must enter expiry date
@@ -1053,6 +1055,7 @@ class PackingRun(Base):
     notes          = Column(String, nullable=True)
     created_at     = Column(DateTime, default=datetime.utcnow)
     closed_at      = Column(DateTime, nullable=True)
+    units_planned  = Column(Integer, nullable=True)         # overall target units for this run
     # Filled at close time
     theoretical_kg = Column(Float, nullable=True)
     actual_kg      = Column(Float, nullable=True)
@@ -1066,7 +1069,9 @@ class PackingRunOutput(Base):
     id             = Column(Integer, primary_key=True, index=True)
     run_id         = Column(Integer, ForeignKey("packing_runs.id"), nullable=False)
     sku_id         = Column(Integer, ForeignKey("skus.id"), nullable=False)
-    qty_packed     = Column(Float, nullable=False)           # boxes packed
+    qty_packed     = Column(Float, nullable=False)           # cases packed (derived from units / case_size)
+    units_packed   = Column(Integer, nullable=True)          # actual units packed (entered by operator)
+    units_planned  = Column(Integer, nullable=True)          # target units for this output SKU
     theoretical_kg = Column(Float, nullable=True)            # filled at close via BOM
 
 class PackingRunBulk(Base):
@@ -1090,6 +1095,7 @@ class LandedCostBatch(Base):
     company_id       = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
     batch_ref        = Column(String, nullable=True)        # e.g. "India Apr 2026"
     supplier         = Column(String, nullable=True)        # e.g. "Spice World Ltd"
+    supplier_country = Column(String, nullable=True)        # e.g. "India"
     currency         = Column(String(10), default="USD")
     # Shared costs split across all line items proportionally by kg
     shared_freight   = Column(Float, default=0.0)           # sea/air freight
@@ -1138,6 +1144,35 @@ class PackingRunCost(Base):
     notes                 = Column(String, nullable=True)
     created_at            = Column(DateTime, default=datetime.utcnow)
     updated_at            = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+# ─── Multi-currency shipment cost lines ──────────────────────
+class ShipmentCostLine(Base):
+    """One cost line per purchase/shipment batch — each can have its own currency."""
+    __tablename__ = "shipment_cost_lines"
+    id                = Column(Integer, primary_key=True, index=True)
+    purchase_batch_id = Column(Integer, ForeignKey("landed_cost_batches.id", ondelete="CASCADE"), nullable=False, index=True)
+    sku_id            = Column(Integer, ForeignKey("skus.id"), nullable=True)  # NULL = shared across all SKUs
+    description       = Column(String, nullable=False)
+    amount            = Column(Float, default=0.0)           # amount in the chosen currency
+    currency          = Column(String(5), default="USD")     # USD | INR | GBP | EUR | PKR
+    fx_rate_to_usd    = Column(Float, default=1.0)           # e.g. 0.012 for INR→USD
+    # usd_equivalent = amount * fx_rate_to_usd (computed in Python)
+    sort_order        = Column(Integer, default=0)
+    created_at        = Column(DateTime, default=datetime.utcnow)
+
+# ─── Multi-currency packing run cost lines ────────────────────
+class RunCostLine(Base):
+    """One cost line per packing run — each can have its own currency (e.g. INR labour)."""
+    __tablename__ = "run_cost_lines"
+    id             = Column(Integer, primary_key=True, index=True)
+    run_id         = Column(Integer, ForeignKey("packing_runs.id", ondelete="CASCADE"), nullable=False, index=True)
+    description    = Column(String, nullable=False)
+    amount         = Column(Float, default=0.0)
+    currency       = Column(String(5), default="USD")
+    fx_rate_to_usd = Column(Float, default=1.0)
+    sort_order     = Column(Integer, default=0)
+    created_at     = Column(DateTime, default=datetime.utcnow)
 
 
 def get_engine(db_path="./wms.db"):

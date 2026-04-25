@@ -164,6 +164,7 @@ const BLANK_FORM = {
   case_size: 24, pallet_size: '', unit_label: 'units', avg_shelf_life_days: 0,
   reorder_point: 10, reorder_qty: 50, max_stock: 200, lead_time_days: 7, vendor_id: '',
   cost_price: '', selling_price: '',
+  unit_weight: '', unit_weight_uom: 'g',
   show_goods_date_on_picking: false,
   require_expiry_entry: false,
   initial_wh1: '', initial_wh2: '',
@@ -690,6 +691,38 @@ function SKUFormModal({ form, editId, categories, vendors, bins, saving, onSet, 
                   )}
                 </div>
               </div>
+              {/* Unit weight — used by Repacking module for BOM auto-calc */}
+              <div className="col-span-2">
+                <label className="label">
+                  Unit weight
+                  <span className="ml-1 text-gray-400 font-normal text-xs">— weight of one unit (used for repacking / production cost tracking)</span>
+                </label>
+                <div className="flex gap-2 items-center">
+                  <input
+                    type="number" min="0" step="any" className="input w-32"
+                    placeholder="e.g. 400"
+                    value={form.unit_weight ?? ''}
+                    onChange={e => onSet('unit_weight', e.target.value)}
+                  />
+                  <select className="input w-24" value={form.unit_weight_uom || 'g'} onChange={e => onSet('unit_weight_uom', e.target.value)}>
+                    <option value="g">g</option>
+                    <option value="kg">kg</option>
+                    <option value="oz">oz</option>
+                    <option value="lbs">lbs</option>
+                    <option value="ml">ml</option>
+                    <option value="l">l</option>
+                  </select>
+                  {form.unit_weight && form.case_size && (
+                    <span className="text-sm text-emerald-700 font-medium bg-emerald-50 px-3 py-1.5 rounded-lg whitespace-nowrap">
+                      → 1 case = {form.case_size} × {form.unit_weight}{form.unit_weight_uom || 'g'}
+                      {form.unit_weight_uom === 'kg' && ` = ${(parseFloat(form.unit_weight) * parseInt(form.case_size)).toFixed(3)} kg bulk/case`}
+                      {form.unit_weight_uom === 'g'  && ` = ${((parseFloat(form.unit_weight) * parseInt(form.case_size)) / 1000).toFixed(3)} kg bulk/case`}
+                      {form.unit_weight_uom === 'oz' && ` = ${((parseFloat(form.unit_weight) * parseInt(form.case_size)) * 0.0283495).toFixed(3)} kg bulk/case`}
+                      {form.unit_weight_uom === 'lbs' && ` = ${((parseFloat(form.unit_weight) * parseInt(form.case_size)) * 0.453592).toFixed(3)} kg bulk/case`}
+                    </span>
+                  )}
+                </div>
+              </div>
               <div>
                 <label className="label">
                   Pallet Size
@@ -1049,6 +1082,8 @@ export default function SKUs({ lang }) {
       selling_price: form.selling_price !== '' && form.selling_price !== null ? parseFloat(form.selling_price) : null,
       show_goods_date_on_picking: !!form.show_goods_date_on_picking,
       require_expiry_entry: !!form.require_expiry_entry,
+      unit_weight: form.unit_weight !== '' && form.unit_weight !== null ? parseFloat(form.unit_weight) : null,
+      unit_weight_uom: form.unit_weight_uom || 'g',
     }
 
     try {
@@ -1086,7 +1121,7 @@ export default function SKUs({ lang }) {
   }
 
   const startEdit = (sku) => {
-    setForm({ ...BLANK_FORM, ...sku, vendor_id: sku.vendor_id || '', pallet_size: sku.pallet_size ?? '', cost_price: sku.cost_price ?? '', selling_price: sku.selling_price ?? '', show_goods_date_on_picking: sku.show_goods_date_on_picking ?? false, require_expiry_entry: sku.require_expiry_entry ?? false })
+    setForm({ ...BLANK_FORM, ...sku, vendor_id: sku.vendor_id || '', pallet_size: sku.pallet_size ?? '', cost_price: sku.cost_price ?? '', selling_price: sku.selling_price ?? '', show_goods_date_on_picking: sku.show_goods_date_on_picking ?? false, require_expiry_entry: sku.require_expiry_entry ?? false, unit_weight: sku.unit_weight ?? '', unit_weight_uom: sku.unit_weight_uom || 'g' })
     setEditId(sku.id)
     setShowForm(true)
   }

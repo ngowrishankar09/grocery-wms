@@ -9,6 +9,7 @@ from models import (
     create_tables, Warehouse, User, Company, CompanyProfile,
     WarehouseTask, SupplierASN, CreditNote, VendorBill, Quote, AuditLog,
     SKU, Vendor, Inventory, Batch, Customer,
+    ShipmentCostLine, RunCostLine,
 )
 from routers import skus, vendors, receiving, orders, inventory, transfers, forecasting, dashboard, upload, settings, dispatch
 from routers import reports, stock_take, notifications, dispatch_board, spreadsheet, quickbooks, bin_locations, purchase_orders, labels, customers, returns, invoices
@@ -166,9 +167,18 @@ def _migrate():
         ("packing_runs",        "landed_cost_id",    "INTEGER"),
         ("landed_costs",        "purchase_batch_id", "INTEGER"),
         # Purchase batch improvements
-        ("landed_cost_batches", "purchase_date",  "DATE"),
-        ("landed_cost_batches", "exchange_rate",  "FLOAT DEFAULT 1.0"),
-        ("landed_costs",        "exchange_rate",  "FLOAT DEFAULT 1.0"),
+        ("landed_cost_batches", "purchase_date",     "DATE"),
+        ("landed_cost_batches", "exchange_rate",     "FLOAT DEFAULT 1.0"),
+        ("landed_costs",        "exchange_rate",     "FLOAT DEFAULT 1.0"),
+        # SKU unit weight (for repacking BOM auto-calculation)
+        ("skus", "unit_weight",     "FLOAT"),
+        ("skus", "unit_weight_uom", "VARCHAR DEFAULT 'g'"),
+        # Shipment supplier country
+        ("landed_cost_batches", "supplier_country", "VARCHAR"),
+        # Packing run unit tracking + shortage
+        ("packing_runs",        "units_planned",  "INTEGER"),
+        ("packing_run_outputs", "units_packed",   "INTEGER"),
+        ("packing_run_outputs", "units_planned",  "INTEGER"),
     ]
     # Use IF NOT EXISTS for PostgreSQL (idempotent); fall back to try/except for SQLite
     add_col = "ADD COLUMN IF NOT EXISTS" if is_postgres else "ADD COLUMN"

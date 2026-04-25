@@ -160,6 +160,71 @@ function SKUSearch({ skus, value, onChange, placeholder = 'Search SKU…', requi
   )
 }
 
+// ── Unit weight conversion helpers ───────────────────────────
+function toKg(weight, uom) {
+  if (!weight) return null
+  const w = parseFloat(weight)
+  if (isNaN(w)) return null
+  switch (uom) {
+    case 'kg':  return w
+    case 'g':   return w / 1000
+    case 'oz':  return w * 0.0283495
+    case 'lbs': return w * 0.453592
+    case 'ml':  return w / 1000   // ml treated as g (water density)
+    case 'l':   return w           // l treated as kg
+    default:    return w / 1000
+  }
+}
+
+// ── Multi-currency cost line row component ────────────────────
+const CURRENCIES = ['USD','INR','GBP','EUR','PKR']
+function CostLineRow({ line, idx, onChange, onRemove, onFetchFx, fetchingFx }) {
+  const usdEq = ((parseFloat(line.amount) || 0) * (parseFloat(line.fx_rate_to_usd) || 1)).toFixed(2)
+  return (
+    <div className="flex items-end gap-2 flex-wrap">
+      <div className="flex-1 min-w-[140px]">
+        {idx === 0 && <label className="block text-xs text-gray-500 mb-1">Description</label>}
+        <input type="text" className="input w-full text-sm" placeholder="e.g. Material cost, Freight…"
+          value={line.description} onChange={e => onChange(idx, 'description', e.target.value)} />
+      </div>
+      <div className="w-28">
+        {idx === 0 && <label className="block text-xs text-gray-500 mb-1">Amount</label>}
+        <input type="number" step="0.01" min="0" className="input w-full text-sm" placeholder="0.00"
+          value={line.amount} onChange={e => onChange(idx, 'amount', e.target.value)} />
+      </div>
+      <div className="w-20">
+        {idx === 0 && <label className="block text-xs text-gray-500 mb-1">Currency</label>}
+        <select className="input w-full text-sm" value={line.currency} onChange={e => onChange(idx, 'currency', e.target.value)}>
+          {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+      </div>
+      <div className="w-28">
+        {idx === 0 && <label className="block text-xs text-gray-500 mb-1">Rate → USD</label>}
+        <div className="flex gap-1">
+          <input type="number" step="0.000001" min="0" className="input flex-1 text-sm min-w-0" placeholder="1.0"
+            value={line.fx_rate_to_usd} onChange={e => onChange(idx, 'fx_rate_to_usd', e.target.value)} />
+          <button type="button"
+            className="text-xs bg-blue-50 border border-blue-200 text-blue-700 rounded px-1.5 hover:bg-blue-100 transition-colors whitespace-nowrap"
+            title={`Fetch live ${line.currency}→USD rate`}
+            onClick={() => onFetchFx(idx, line.currency)}
+            disabled={fetchingFx === idx || line.currency === 'USD'}
+          >
+            {fetchingFx === idx ? <Loader2 size={10} className="animate-spin" /> : '↻'}
+          </button>
+        </div>
+      </div>
+      <div className="w-24 text-right">
+        {idx === 0 && <label className="block text-xs text-gray-500 mb-1">≈ USD</label>}
+        <div className="text-sm font-semibold text-green-700 py-2">${usdEq}</div>
+      </div>
+      <button type="button" onClick={() => onRemove(idx)}
+        className="text-gray-300 hover:text-red-500 p-1.5 rounded transition-colors mb-0.5">
+        <X size={14} />
+      </button>
+    </div>
+  )
+}
+
 // ── Tab 1: Conversion Rates (Bills of Materials) ──────────────
 function BOMTab({ skus }) {
   const [boms, setBoms]         = useState([])
@@ -175,6 +240,31 @@ function BOMTab({ skus }) {
   const [formError, setFormError] = useState(null)
 
   const emptyForm = { output_sku_id: '', input_sku_id: '', qty_per_unit: '', unit: 'kg', waste_pct_allowed: 2, notes: '' }
+
+  // Auto-calc qty_per_unit from SKU unit_weight when retail SKU is selected
+  const handleOutputSkuChange = (skuId) => {
+    setForm(f => {
+      const sku = skus.find(s => String(s.id) === String(skuId))
+      if (sku?.unit_weight && sku?.case_size) {
+        const kgPerUnit = toKg(sku.unit_weight, sku.unit_weight_uom || 'g')
+        const kgPerCase = kgPerUnit * sku.case_size
+        return { ...f, output_sku_id: skuId, qty_per_unit: kgPerCase.toFixed(4) }
+      }
+      return { ...f, output_sku_id: skuId }
+    })
+  }
+
+  // Compute auto-calc preview for current form output SKU
+  const autoCalcPreview = (() => {
+    const sku = skus.find(s => String(s.id) === String(form.output_sku_id))
+    if (!sku?.unit_weight || !sku?.case_size) return null
+    const kgPerUnit = toKg(sku.unit_weight, sku.unit_weight_uom || 'g')
+    const kgPerCase = kgPerUnit * sku.case_size
+    return {
+      units: sku.case_size, weight: sku.unit_weight, uom: sku.unit_weight_uom || 'g',
+      kgPerCase: kgPerCase.toFixed(4),
+    }
+  })()
 
   const load = useCallback(async () => {
     setLoading(true); setError(null)
@@ -272,10 +362,15 @@ function BOMTab({ skus }) {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">Retail product (what you pack into cases) <span className="text-red-500">*</span></label>
-                <select className="input w-full" value={form.output_sku_id} onChange={e => setForm(f => ({ ...f, output_sku_id: e.target.value }))} required>
+                <select className="input w-full" value={form.output_sku_id} onChange={e => handleOutputSkuChange(e.target.value)} required>
                   <option value="">Select retail SKU…</option>
                   {skus.map(s => <option key={s.id} value={s.id}>{s.product_name} ({s.sku_code})</option>)}
                 </select>
+                {autoCalcPreview && (
+                  <p className="text-xs text-emerald-700 mt-1 bg-emerald-50 px-2 py-1 rounded font-medium">
+                    ✓ Auto-calculated: {autoCalcPreview.units} units × {autoCalcPreview.weight}{autoCalcPreview.uom} = {autoCalcPreview.kgPerCase} kg bulk/case
+                  </p>
+                )}
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">Bulk material used to make it <span className="text-red-500">*</span></label>
@@ -287,10 +382,14 @@ function BOMTab({ skus }) {
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">Bulk consumed per case (kg) <span className="text-red-500">*</span></label>
                 <div className="flex gap-2">
-                  <input type="number" step="0.001" min="0.001" className="input flex-1" placeholder="e.g. 4.0" value={form.qty_per_unit} onChange={e => setForm(f => ({ ...f, qty_per_unit: e.target.value }))} required />
+                  <input type="number" step="0.001" min="0.001" className="input flex-1" placeholder="e.g. 8.0" value={form.qty_per_unit} onChange={e => setForm(f => ({ ...f, qty_per_unit: e.target.value }))} required />
                   <input type="text" className="input w-20" placeholder="kg" value={form.unit} onChange={e => setForm(f => ({ ...f, unit: e.target.value }))} />
                 </div>
-                <p className="text-xs text-gray-400 mt-1">Example: 20 × 200g sachets per case = <strong>4.0 kg</strong> bulk consumed per case packed.</p>
+                <p className="text-xs text-gray-400 mt-1">
+                  {autoCalcPreview
+                    ? `Auto-filled from SKU master: ${autoCalcPreview.units} units × ${autoCalcPreview.weight}${autoCalcPreview.uom}. Edit SKU Master to change unit weight.`
+                    : 'Example: 20 × 400g packs = 8.0 kg bulk per case. Set unit weight on SKU Master for auto-fill.'}
+                </p>
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">
@@ -379,14 +478,39 @@ function PurchasesTab({ skus }) {
   const [formError, setFormError]   = useState(null)
   const [deleting, setDeleting]     = useState(null)
 
+  const emptyCostLine = () => ({ description: '', amount: '', currency: 'USD', fx_rate_to_usd: '1', sort_order: 0 })
   const emptyLine = () => ({ bulk_sku_id: '', qty_kg: '', cost_material: '', cost_packaging_mat: '', cost_labor: '' })
   const emptyForm = () => ({
-    batch_ref: '', supplier: '', currency: 'USD', purchase_date: '', exchange_rate: '1',
+    batch_ref: '', supplier: '', supplier_country: '', currency: 'USD', purchase_date: '', exchange_rate: '1',
     shared_freight: '', shared_duty: '', shared_overhead: '', shared_other: '',
     notes: '',
     lines: [emptyLine()],
+    cost_lines: [],   // new multi-currency cost lines
   })
   const [form, setForm] = useState(emptyForm())
+  const [fetchingFx, setFetchingFx] = useState(null)  // idx of line currently fetching
+
+  const fetchFxRate = async (idx, currency) => {
+    if (currency === 'USD') return
+    setFetchingFx(idx)
+    try {
+      const res = await repackingAPI.getFxRate(currency)
+      const rate = res.data.rate
+      setForm(f => {
+        const cl = [...f.cost_lines]
+        cl[idx] = { ...cl[idx], fx_rate_to_usd: String(rate) }
+        return { ...f, cost_lines: cl }
+      })
+    } catch (e) {
+      alert(`Could not fetch live ${currency}/USD rate. Please enter manually.`)
+    } finally { setFetchingFx(null) }
+  }
+
+  const updateCostLine  = (i, key, val) => setForm(f => {
+    const cl = [...f.cost_lines]; cl[i] = { ...cl[i], [key]: val }; return { ...f, cost_lines: cl }
+  })
+  const addCostLine    = () => setForm(f => ({ ...f, cost_lines: [...f.cost_lines, emptyCostLine()] }))
+  const removeCostLine = (i) => setForm(f => ({ ...f, cost_lines: f.cost_lines.filter((_, idx) => idx !== i) }))
 
   const load = useCallback(async () => {
     setLoading(true); setError(null)
@@ -442,22 +566,30 @@ function PurchasesTab({ skus }) {
       const res = await repackingAPI.getPurchase(purchase.id)
       const d = res.data
       setForm({
-        batch_ref:       d.batch_ref      || '',
-        supplier:        d.supplier       || '',
-        currency:        d.currency       || 'USD',
-        purchase_date:   d.purchase_date  || '',
-        exchange_rate:   String(d.exchange_rate ?? 1),
-        shared_freight:  String(d.shared_freight  ?? 0),
-        shared_duty:     String(d.shared_duty     ?? 0),
-        shared_overhead: String(d.shared_overhead ?? 0),
-        shared_other:    String(d.shared_other    ?? 0),
-        notes:           d.notes || '',
+        batch_ref:        d.batch_ref       || '',
+        supplier:         d.supplier        || '',
+        supplier_country: d.supplier_country || '',
+        currency:         d.currency        || 'USD',
+        purchase_date:    d.purchase_date   || '',
+        exchange_rate:    String(d.exchange_rate ?? 1),
+        shared_freight:   String(d.shared_freight  ?? 0),
+        shared_duty:      String(d.shared_duty     ?? 0),
+        shared_overhead:  String(d.shared_overhead ?? 0),
+        shared_other:     String(d.shared_other    ?? 0),
+        notes:            d.notes || '',
         lines: (d.items || []).map(item => ({
           bulk_sku_id:        String(item.bulk_sku_id),
           qty_kg:             String(item.qty_kg),
           cost_material:      String(item.cost_material      ?? 0),
           cost_packaging_mat: String(item.cost_packaging_mat ?? 0),
           cost_labor:         String(item.cost_labor         ?? 0),
+        })),
+        cost_lines: (d.cost_lines || []).map(cl => ({
+          description:    cl.description,
+          amount:         String(cl.amount),
+          currency:       cl.currency || 'USD',
+          fx_rate_to_usd: String(cl.fx_rate_to_usd ?? 1),
+          sort_order:     cl.sort_order || 0,
         })),
       })
     } catch (e) {
@@ -472,16 +604,17 @@ function PurchasesTab({ skus }) {
       setFormError('Please add at least one SKU line with a quantity.'); return
     }
     const payload = {
-      batch_ref:       form.batch_ref     || null,
-      supplier:        form.supplier      || null,
-      currency:        form.currency,
-      purchase_date:   form.purchase_date || null,
-      exchange_rate:   parseFloat(form.exchange_rate) || 1.0,
-      shared_freight:  parseFloat(form.shared_freight)  || 0,
-      shared_duty:     parseFloat(form.shared_duty)     || 0,
-      shared_overhead: parseFloat(form.shared_overhead) || 0,
-      shared_other:    parseFloat(form.shared_other)    || 0,
-      notes:           form.notes || null,
+      batch_ref:        form.batch_ref      || null,
+      supplier:         form.supplier       || null,
+      supplier_country: form.supplier_country || null,
+      currency:         form.currency,
+      purchase_date:    form.purchase_date  || null,
+      exchange_rate:    parseFloat(form.exchange_rate) || 1.0,
+      shared_freight:   parseFloat(form.shared_freight)  || 0,
+      shared_duty:      parseFloat(form.shared_duty)     || 0,
+      shared_overhead:  parseFloat(form.shared_overhead) || 0,
+      shared_other:     parseFloat(form.shared_other)    || 0,
+      notes:            form.notes || null,
       lines: validLines.map(l => ({
         bulk_sku_id:        parseInt(l.bulk_sku_id),
         qty_kg:             parseFloat(l.qty_kg),
@@ -489,6 +622,15 @@ function PurchasesTab({ skus }) {
         cost_packaging_mat: parseFloat(l.cost_packaging_mat) || 0,
         cost_labor:         parseFloat(l.cost_labor)         || 0,
       })),
+      cost_lines: form.cost_lines
+        .filter(cl => cl.description && cl.amount)
+        .map((cl, i) => ({
+          description:    cl.description,
+          amount:         parseFloat(cl.amount) || 0,
+          currency:       cl.currency || 'USD',
+          fx_rate_to_usd: parseFloat(cl.fx_rate_to_usd) || 1.0,
+          sort_order:     i,
+        })),
     }
     setSaving(true)
     try {
@@ -547,18 +689,16 @@ function PurchasesTab({ skus }) {
                   <input type="text" className="input w-full" placeholder="e.g. India Apr 2026" value={form.batch_ref} onChange={e => setForm(f => ({ ...f, batch_ref: e.target.value }))} />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Supplier</label>
-                  <input type="text" className="input w-full" placeholder="e.g. Spice Traders Ltd" value={form.supplier} onChange={e => setForm(f => ({ ...f, supplier: e.target.value }))} />
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Supplier / Mill Name</label>
+                  <input type="text" className="input w-full" placeholder="e.g. Kohinoor Foods Ltd" value={form.supplier} onChange={e => setForm(f => ({ ...f, supplier: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Supplier Country</label>
+                  <input type="text" className="input w-full" placeholder="e.g. India, Pakistan…" value={form.supplier_country} onChange={e => setForm(f => ({ ...f, supplier_country: e.target.value }))} />
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">Purchase Date</label>
                   <input type="date" className="input w-full" value={form.purchase_date} onChange={e => setForm(f => ({ ...f, purchase_date: e.target.value }))} />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Currency</label>
-                  <select className="input w-full" value={form.currency} onChange={e => setForm(f => ({ ...f, currency: e.target.value, exchange_rate: e.target.value === 'USD' ? '1' : f.exchange_rate }))}>
-                    {['USD','AUD','EUR','GBP','CAD','INR','NZD'].map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
                 </div>
               </div>
               {/* Exchange rate row — only show when currency ≠ USD */}
@@ -585,31 +725,59 @@ function PurchasesTab({ skus }) {
               )}
             </div>
 
-            {/* ── Shared costs ────────────────────────────────── */}
+            {/* ── Cost Lines (multi-currency) ──────────────────── */}
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">
-                Shared Costs
-                <span className="ml-1 font-normal text-gray-400 normal-case">— entered once, split proportionally by weight across all SKU lines</span>
-              </p>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                {[
-                  { key: 'shared_freight',  label: 'Freight / Shipping ($)' },
-                  { key: 'shared_duty',     label: 'Import Duty ($)' },
-                  { key: 'shared_overhead', label: 'Overhead ($)' },
-                  { key: 'shared_other',    label: 'Other Shared ($)' },
-                ].map(({ key, label }) => (
-                  <div key={key}>
-                    <label className="block text-xs font-medium text-gray-700 mb-1">{label}</label>
-                    <input type="number" step="0.01" min="0" className="input w-full" placeholder="0.00"
-                      value={form[key]} onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))} />
-                  </div>
-                ))}
+              <div className="flex items-center justify-between mb-2">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                    Shipment Cost Lines
+                    <span className="ml-1 font-normal text-gray-400 normal-case">— each cost can be in a different currency</span>
+                  </p>
+                  <p className="text-xs text-gray-400 mt-0.5">Add material cost, freight, duty, handling — anything. Each gets its own currency &amp; FX rate.</p>
+                </div>
+                <button type="button" onClick={addCostLine} className="text-xs text-blue-600 hover:text-blue-800 font-semibold flex items-center gap-1 whitespace-nowrap">
+                  <Plus size={12} /> Add Cost Line
+                </button>
               </div>
-              {totalSharedCost > 0 && (
-                <p className="text-xs text-green-700 mt-1.5 font-medium">
-                  Total shared: ${totalSharedCost.toFixed(2)} — will be proportionally allocated below
-                </p>
+              {form.cost_lines.length === 0 ? (
+                <p className="text-xs text-gray-400 italic py-2">No cost lines yet — click "Add Cost Line" to start.</p>
+              ) : (
+                <div className="space-y-2 bg-white border border-gray-200 rounded-xl p-3">
+                  {form.cost_lines.map((cl, i) => (
+                    <CostLineRow
+                      key={i} line={cl} idx={i}
+                      onChange={updateCostLine}
+                      onRemove={removeCostLine}
+                      onFetchFx={fetchFxRate}
+                      fetchingFx={fetchingFx}
+                    />
+                  ))}
+                  <div className="border-t border-gray-100 pt-2 flex justify-end gap-4 text-sm">
+                    <span className="text-gray-500">Total cost (USD equivalent):</span>
+                    <span className="font-bold text-gray-800">
+                      ${form.cost_lines.reduce((sum, cl) => sum + ((parseFloat(cl.amount) || 0) * (parseFloat(cl.fx_rate_to_usd) || 1)), 0).toFixed(2)}
+                    </span>
+                  </div>
+                </div>
               )}
+              {/* Legacy shared costs (kept for backward compat on saved records) */}
+              <details className="mt-2">
+                <summary className="text-xs text-gray-400 cursor-pointer hover:text-gray-600">Legacy shared cost fields (optional)</summary>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-2">
+                  {[
+                    { key: 'shared_freight',  label: 'Freight ($)' },
+                    { key: 'shared_duty',     label: 'Import Duty ($)' },
+                    { key: 'shared_overhead', label: 'Overhead ($)' },
+                    { key: 'shared_other',    label: 'Other ($)' },
+                  ].map(({ key, label }) => (
+                    <div key={key}>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">{label}</label>
+                      <input type="number" step="0.01" min="0" className="input w-full" placeholder="0.00"
+                        value={form[key]} onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))} />
+                    </div>
+                  ))}
+                </div>
+              </details>
             </div>
 
             {/* ── SKU Lines ───────────────────────────────────── */}
@@ -751,6 +919,7 @@ function PurchasesTab({ skus }) {
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-semibold text-gray-800">{purchase.batch_ref || `Batch #${purchase.id}`}</span>
                       {purchase.supplier && <span className="text-xs text-gray-500">· {purchase.supplier}</span>}
+                      {purchase.supplier_country && <span className="text-xs px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded">🌍 {purchase.supplier_country}</span>}
                       <span className="text-xs px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded font-mono">{purchase.currency}</span>
                       {purchase.exchange_rate && purchase.exchange_rate !== 1 && (
                         <span className="text-xs px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded font-mono">
@@ -913,34 +1082,46 @@ function PurchasesTab({ skus }) {
 
 // ── Operational Costs card (inside Run Detail) ────────────────
 function OperationalCostsCard({ runDetail, onSaved }) {
-  const [costs, setCosts]         = useState(null)
   const [summary, setSummary]     = useState(null)
   const [loadingCosts, setLoadingCosts]     = useState(true)
   const [loadingSummary, setLoadingSummary] = useState(false)
-  const [form, setForm] = useState({
-    cost_packaging_mat: '', cost_labor: '', cost_overhead: '', cost_other: '', labor_hours: '', notes: '',
-  })
-  const [saving, setSaving]     = useState(false)
-  const [saveError, setSaveError] = useState(null)
-  const [saveOk, setSaveOk]     = useState(false)
+  // New multi-currency cost lines
+  const [costLines, setCostLines]   = useState([])
+  const [savingLines, setSavingLines] = useState(false)
+  const [saveLineOk, setSaveLineOk]  = useState(false)
+  const [saveLineErr, setSaveLineErr] = useState(null)
+  const [fetchingFx, setFetchingFx]  = useState(null)
 
-  const loadCosts = useCallback(async () => {
+  const emptyCostLine = () => ({ description: '', amount: '', currency: 'USD', fx_rate_to_usd: '1' })
+
+  const loadCostLines = useCallback(async () => {
     setLoadingCosts(true)
     try {
-      const res = await repackingAPI.getRunCosts(runDetail.id)
-      const d = res.data
-      setCosts(d)
-      setForm({
-        cost_packaging_mat: d.cost_packaging_mat != null ? String(d.cost_packaging_mat) : '',
-        cost_labor:         d.cost_labor != null ? String(d.cost_labor) : '',
-        cost_overhead:      d.cost_overhead != null ? String(d.cost_overhead) : '',
-        cost_other:         d.cost_other != null ? String(d.cost_other) : '',
-        labor_hours:        d.labor_hours != null ? String(d.labor_hours) : '',
-        notes:              d.notes || '',
-      })
-    } catch {}
+      const res = await repackingAPI.getRunCostLines(runDetail.id)
+      const lines = res.data
+      setCostLines(lines.length > 0
+        ? lines.map(l => ({ description: l.description, amount: String(l.amount), currency: l.currency, fx_rate_to_usd: String(l.fx_rate_to_usd) }))
+        : [emptyCostLine()]
+      )
+    } catch { setCostLines([emptyCostLine()]) }
     finally { setLoadingCosts(false) }
   }, [runDetail.id])
+
+  const fetchFxRate = async (idx, currency) => {
+    if (currency === 'USD') return
+    setFetchingFx(idx)
+    try {
+      const res = await repackingAPI.getFxRate(currency)
+      setCostLines(cl => {
+        const n = [...cl]; n[idx] = { ...n[idx], fx_rate_to_usd: String(res.data.rate) }; return n
+      })
+    } catch { alert(`Could not fetch live ${currency}/USD rate.`) }
+    finally { setFetchingFx(null) }
+  }
+
+  const updateLine  = (i, k, v) => setCostLines(cl => { const n = [...cl]; n[i] = { ...n[i], [k]: v }; return n })
+  const addLine     = () => setCostLines(cl => [...cl, emptyCostLine()])
+  const removeLine  = (i) => setCostLines(cl => cl.filter((_, idx) => idx !== i))
 
   const loadSummary = useCallback(async () => {
     if (runDetail.status !== 'closed') return
@@ -952,38 +1133,32 @@ function OperationalCostsCard({ runDetail, onSaved }) {
     finally { setLoadingSummary(false) }
   }, [runDetail.id, runDetail.status])
 
-  useEffect(() => { loadCosts() }, [loadCosts])
+  useEffect(() => { loadCostLines() }, [loadCostLines])
   useEffect(() => { loadSummary() }, [loadSummary])
 
-  const handleSave = async (e) => {
-    e.preventDefault(); setSaveError(null); setSaveOk(false)
-    setSaving(true)
+  const handleSaveLines = async (e) => {
+    e.preventDefault(); setSaveLineErr(null); setSaveLineOk(false)
+    setSavingLines(true)
     try {
-      await repackingAPI.saveRunCosts(runDetail.id, {
-        cost_packaging_mat: parseFloat(form.cost_packaging_mat) || 0,
-        cost_labor:         parseFloat(form.cost_labor) || 0,
-        cost_overhead:      parseFloat(form.cost_overhead) || 0,
-        cost_other:         parseFloat(form.cost_other) || 0,
-        labor_hours:        form.labor_hours ? parseFloat(form.labor_hours) : null,
-        notes:              form.notes || null,
-      })
-      setSaveOk(true)
-      await loadCosts()
+      const valid = costLines.filter(cl => cl.description && cl.amount)
+      await repackingAPI.saveRunCostLines(runDetail.id, valid.map((cl, i) => ({
+        description:    cl.description,
+        amount:         parseFloat(cl.amount) || 0,
+        currency:       cl.currency || 'USD',
+        fx_rate_to_usd: parseFloat(cl.fx_rate_to_usd) || 1.0,
+        sort_order:     i,
+      })))
+      setSaveLineOk(true)
+      await loadCostLines()
       await loadSummary()
       if (onSaved) onSaved()
     } catch (e) {
-      setSaveError(e.response?.data?.detail || 'Failed to save costs')
-    } finally { setSaving(false) }
+      setSaveLineErr(e.response?.data?.detail || 'Failed to save costs')
+    } finally { setSavingLines(false) }
   }
 
-  const totalPacking =
-    (parseFloat(form.cost_packaging_mat) || 0) +
-    (parseFloat(form.cost_labor) || 0) +
-    (parseFloat(form.cost_overhead) || 0) +
-    (parseFloat(form.cost_other) || 0)
-
-  const totalCases = runDetail.outputs?.reduce((s, o) => s + (o.qty_packed || 0), 0) ?? 0
-  const costPerCase = totalCases > 0 ? totalPacking / totalCases : 0
+  const totalLinesUsd = costLines.reduce((s, cl) => s + ((parseFloat(cl.amount) || 0) * (parseFloat(cl.fx_rate_to_usd) || 1)), 0)
+  const totalCases    = runDetail.outputs?.reduce((s, o) => s + (o.qty_packed || 0), 0) ?? 0
 
   if (loadingCosts) {
     return <div className="card flex justify-center py-8"><Loader2 className="animate-spin text-blue-500" size={22} /></div>
@@ -993,53 +1168,48 @@ function OperationalCostsCard({ runDetail, onSaved }) {
     <div className="card space-y-5">
       <div className="flex items-center gap-2">
         <DollarSign size={18} className="text-green-600" />
-        <h3 className="font-semibold text-gray-800 text-base">Operational Costs</h3>
+        <h3 className="font-semibold text-gray-800 text-base">Packing Unit Costs</h3>
       </div>
 
       <div>
-        <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-3">
-          Packing Run Costs
-          <span className="ml-1 normal-case font-normal text-gray-400">— packaging, labour &amp; overhead for this run</span>
-        </p>
-        <form onSubmit={handleSave} className="space-y-3">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            {[
-              { key: 'cost_packaging_mat', label: 'Packaging Materials ($)' },
-              { key: 'cost_labor',         label: 'Labor ($)' },
-              { key: 'cost_overhead',      label: 'Overhead ($)' },
-              { key: 'cost_other',         label: 'Other ($)' },
-            ].map(({ key, label }) => (
-              <div key={key}>
-                <label className="block text-xs font-medium text-gray-700 mb-1">{label}</label>
-                <input type="number" step="0.01" min="0" className="input w-full" placeholder="0.00" value={form[key]} onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))} />
-              </div>
-            ))}
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+              Cost Lines
+              <span className="ml-1 normal-case font-normal text-gray-400">— labour, packaging, transport — each in its own currency</span>
+            </p>
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Labor Hours (optional)</label>
-              <input type="number" step="0.25" min="0" className="input w-full" placeholder="e.g. 8.5" value={form.labor_hours} onChange={e => setForm(f => ({ ...f, labor_hours: e.target.value }))} />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Notes</label>
-              <input type="text" className="input w-full" placeholder="Optional notes…" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
-            </div>
+          <button type="button" onClick={addLine} className="text-xs text-blue-600 hover:text-blue-800 font-semibold flex items-center gap-1">
+            <Plus size={12} /> Add Line
+          </button>
+        </div>
+        <form onSubmit={handleSaveLines} className="space-y-3">
+          <div className="space-y-2">
+            {costLines.map((cl, i) => (
+              <CostLineRow
+                key={i} line={cl} idx={i}
+                onChange={updateLine}
+                onRemove={removeLine}
+                onFetchFx={fetchFxRate}
+                fetchingFx={fetchingFx}
+              />
+            ))}
           </div>
           <div className="bg-gray-50 rounded-lg px-4 py-3 grid grid-cols-2 gap-4 text-sm">
             <div>
-              <span className="text-gray-500">Total packing cost</span>
-              <span className="ml-2 font-bold text-gray-800">{fmt$(totalPacking)}</span>
+              <span className="text-gray-500">Total packing cost (USD)</span>
+              <span className="ml-2 font-bold text-gray-800">{fmt$(totalLinesUsd)}</span>
             </div>
             <div>
               <span className="text-gray-500">Cost per case</span>
-              <span className="ml-2 font-bold text-gray-800">{fmt$(costPerCase)}</span>
-              <span className="text-xs text-gray-400 ml-1">({totalCases} cases)</span>
+              <span className="ml-2 font-bold text-gray-800">{fmt$(totalCases > 0 ? totalLinesUsd / totalCases : 0)}</span>
+              <span className="text-xs text-gray-400 ml-1">({totalCases.toFixed(2)} cases)</span>
             </div>
           </div>
-          {saveError && <p className="text-sm text-red-600 flex items-center gap-1"><AlertTriangle size={14} /> {saveError}</p>}
-          {saveOk && <p className="text-sm text-green-600 flex items-center gap-1"><CheckCircle2 size={14} /> Costs saved successfully.</p>}
-          <button type="submit" className="btn-primary flex items-center gap-1.5" disabled={saving}>
-            {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+          {saveLineErr && <p className="text-sm text-red-600 flex items-center gap-1"><AlertTriangle size={14} /> {saveLineErr}</p>}
+          {saveLineOk && <p className="text-sm text-green-600 flex items-center gap-1"><CheckCircle2 size={14} /> Costs saved.</p>}
+          <button type="submit" className="btn-primary flex items-center gap-1.5" disabled={savingLines}>
+            {savingLines ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
             Save Costs
           </button>
         </form>
@@ -1160,13 +1330,13 @@ function RunsTab({ skus, landedCosts }) {
   const [showNewRun, setShowNewRun] = useState(false)
 
   const [runForm, setRunForm] = useState({
-    run_ref: '', bulk_sku_id: '', qty_start: '', started_by: '', notes: '', landed_cost_id: '',
+    run_ref: '', bulk_sku_id: '', qty_start: '', started_by: '', notes: '', landed_cost_id: '', units_planned: '',
   })
   const [runFormError, setRunFormError] = useState(null)
   const [creatingRun, setCreatingRun]   = useState(false)
 
   const [showAddOutput, setShowAddOutput] = useState(false)
-  const [outputForm, setOutputForm]       = useState({ sku_id: '', qty_packed: '' })
+  const [outputForm, setOutputForm]       = useState({ sku_id: '', units_packed: '', units_planned: '' })
   const [outputFormError, setOutputFormError] = useState(null)
   const [addingOutput, setAddingOutput]   = useState(false)
 
@@ -1228,9 +1398,10 @@ function RunsTab({ skus, landedCosts }) {
         started_by:     runForm.started_by || null,
         notes:          runForm.notes || null,
         landed_cost_id: runForm.landed_cost_id ? parseInt(runForm.landed_cost_id) : null,
+        units_planned:  runForm.units_planned ? parseInt(runForm.units_planned) : null,
       })
       setShowNewRun(false)
-      setRunForm({ run_ref: '', bulk_sku_id: '', qty_start: '', started_by: '', notes: '', landed_cost_id: '' })
+      setRunForm({ run_ref: '', bulk_sku_id: '', qty_start: '', started_by: '', notes: '', landed_cost_id: '', units_planned: '' })
       await loadRuns()
       handleSelectRun(res.data)
     } catch (e) {
@@ -1240,17 +1411,24 @@ function RunsTab({ skus, landedCosts }) {
 
   const handleAddOutput = async (e) => {
     e.preventDefault(); setOutputFormError(null)
-    if (!outputForm.sku_id || !outputForm.qty_packed) {
-      setOutputFormError('Please select a SKU and enter quantity packed.'); return
+    if (!outputForm.sku_id || (!outputForm.units_packed && !outputForm.qty_packed)) {
+      setOutputFormError('Please select a SKU and enter units packed.'); return
     }
+    const sku = skus.find(s => String(s.id) === String(outputForm.sku_id))
+    const unitsPacked  = parseInt(outputForm.units_packed) || 0
+    const caseSize     = sku?.case_size || 1
+    // Derive cases from units (can be fractional)
+    const qtyPacked    = outputForm.units_packed ? unitsPacked / caseSize : parseFloat(outputForm.qty_packed) || 0
     setAddingOutput(true)
     try {
       await repackingAPI.addOutput(runDetail.id, {
-        sku_id:     parseInt(outputForm.sku_id),
-        qty_packed: parseFloat(outputForm.qty_packed),
+        sku_id:        parseInt(outputForm.sku_id),
+        qty_packed:    qtyPacked,
+        units_packed:  outputForm.units_packed ? unitsPacked : null,
+        units_planned: outputForm.units_planned ? parseInt(outputForm.units_planned) : null,
       })
       setShowAddOutput(false)
-      setOutputForm({ sku_id: '', qty_packed: '' })
+      setOutputForm({ sku_id: '', units_packed: '', units_planned: '' })
       loadDetail(runDetail.id)
     } catch (e) {
       setOutputFormError(e.response?.data?.detail || 'Failed to add output')
@@ -1419,26 +1597,53 @@ function RunsTab({ skus, landedCosts }) {
 
               {showAddOutput && runDetail.status === 'open' && (
                 <form onSubmit={handleAddOutput} className="mb-4 p-3 bg-gray-50 rounded-lg space-y-2">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-xs font-medium text-gray-700 mb-1">Retail SKU (what was packed)</label>
-                      <select className="input w-full" value={outputForm.sku_id} onChange={e => setOutputForm(f => ({ ...f, sku_id: e.target.value }))} required>
-                        <option value="">Select SKU…</option>
-                        {skus.map(s => <option key={s.id} value={s.id}>{s.product_name} ({s.sku_code})</option>)}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-700 mb-1">Cases packed</label>
-                      <input type="number" step="1" min="1" className="input w-full" placeholder="e.g. 50 cases" value={outputForm.qty_packed} onChange={e => setOutputForm(f => ({ ...f, qty_packed: e.target.value }))} required />
-                    </div>
-                  </div>
-                  {outputFormError && <p className="text-xs text-red-600 flex items-center gap-1"><AlertTriangle size={12} /> {outputFormError}</p>}
-                  <div className="flex gap-2">
-                    <button type="submit" className="btn-primary text-sm" disabled={addingOutput}>
-                      {addingOutput && <Loader2 size={13} className="animate-spin inline mr-1" />} Save
-                    </button>
-                    <button type="button" className="btn-secondary text-sm" onClick={() => setShowAddOutput(false)}>Cancel</button>
-                  </div>
+                  {(() => {
+                    const sku = skus.find(s => String(s.id) === String(outputForm.sku_id))
+                    const caseSize = sku?.case_size
+                    const unitsPacked = parseInt(outputForm.units_packed) || 0
+                    const casesFromUnits = caseSize && unitsPacked ? (unitsPacked / caseSize).toFixed(2) : null
+                    return (
+                      <>
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                          <div>
+                            <label className="block text-xs font-medium text-gray-700 mb-1">Retail SKU (what was packed) <span className="text-red-500">*</span></label>
+                            <select className="input w-full" value={outputForm.sku_id} onChange={e => setOutputForm(f => ({ ...f, sku_id: e.target.value }))} required>
+                              <option value="">Select SKU…</option>
+                              {skus.map(s => <option key={s.id} value={s.id}>{s.product_name} ({s.sku_code})</option>)}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-700 mb-1">
+                              Units actually packed <span className="text-red-500">*</span>
+                              {caseSize && <span className="ml-1 text-gray-400 font-normal">(1 case = {caseSize} units)</span>}
+                            </label>
+                            <input type="number" step="1" min="0" className="input w-full" placeholder="e.g. 220"
+                              value={outputForm.units_packed} onChange={e => setOutputForm(f => ({ ...f, units_packed: e.target.value }))} required />
+                            {casesFromUnits && <p className="text-xs text-blue-600 mt-0.5">→ {casesFromUnits} cases</p>}
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-700 mb-1">
+                              Units planned <span className="text-gray-400 font-normal">(optional — for shortage tracking)</span>
+                            </label>
+                            <input type="number" step="1" min="0" className="input w-full" placeholder="e.g. 245"
+                              value={outputForm.units_planned} onChange={e => setOutputForm(f => ({ ...f, units_planned: e.target.value }))} />
+                            {outputForm.units_planned && outputForm.units_packed && parseInt(outputForm.units_planned) > parseInt(outputForm.units_packed) && (
+                              <p className="text-xs text-amber-600 mt-0.5 font-semibold">
+                                ⚠ Short by {parseInt(outputForm.units_planned) - parseInt(outputForm.units_packed)} units
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                        {outputFormError && <p className="text-xs text-red-600 flex items-center gap-1"><AlertTriangle size={12} /> {outputFormError}</p>}
+                        <div className="flex gap-2">
+                          <button type="submit" className="btn-primary text-sm" disabled={addingOutput}>
+                            {addingOutput && <Loader2 size={13} className="animate-spin inline mr-1" />} Save
+                          </button>
+                          <button type="button" className="btn-secondary text-sm" onClick={() => setShowAddOutput(false)}>Cancel</button>
+                        </div>
+                      </>
+                    )
+                  })()}
                 </form>
               )}
 
@@ -1449,6 +1654,7 @@ function RunsTab({ skus, landedCosts }) {
                   <thead className="text-xs text-gray-500 uppercase tracking-wide">
                     <tr>
                       <th className="pb-2 text-left">SKU</th>
+                      <th className="pb-2 text-right">Units</th>
                       <th className="pb-2 text-right">Cases</th>
                       <th className="pb-2 text-right">BOM rate</th>
                       <th className="pb-2 text-right">Bulk used</th>
@@ -1458,13 +1664,31 @@ function RunsTab({ skus, landedCosts }) {
                   <tbody className="divide-y divide-gray-100">
                     {runDetail.outputs.map(o => {
                       const liveKg = o.bom_live_kg ?? o.theoretical_kg
+                      const shortage = (o.units_planned && o.units_packed && o.units_planned > o.units_packed)
+                        ? o.units_planned - o.units_packed : 0
                       return (
                         <tr key={o.id}>
                           <td className="py-2">
                             <div className="font-medium text-gray-800">{o.product_name}</div>
                             <div className="text-xs text-gray-400">{o.sku_code}</div>
                           </td>
-                          <td className="py-2 text-right font-mono font-semibold">{o.qty_packed}</td>
+                          <td className="py-2 text-right">
+                            {o.units_packed != null ? (
+                              <div>
+                                <span className="font-mono font-semibold">{o.units_packed}</span>
+                                {o.units_planned && (
+                                  <span className="text-xs text-gray-400 ml-1">/ {o.units_planned}</span>
+                                )}
+                                {shortage > 0 && (
+                                  <div className="text-xs font-semibold text-amber-600">⚠ -{shortage} short</div>
+                                )}
+                                {o.units_planned && !shortage && (
+                                  <div className="text-xs text-green-600">✓ fulfilled</div>
+                                )}
+                              </div>
+                            ) : '—'}
+                          </td>
+                          <td className="py-2 text-right font-mono font-semibold">{(+o.qty_packed).toFixed(2)}</td>
                           <td className="py-2 text-right text-xs text-gray-500">
                             {o.bom_qty_per_unit != null
                               ? `${o.bom_qty_per_unit} ${o.bom_unit ?? 'kg'}/case`
