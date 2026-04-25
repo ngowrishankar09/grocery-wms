@@ -3,7 +3,7 @@ import { repackingAPI, skuAPI } from '../api/client'
 import {
   Loader2, Plus, Trash2, Package, ChevronLeft, AlertTriangle,
   CheckCircle2, X, Factory, Scale, DollarSign, Edit2, Save,
-  Info, ChevronDown, ChevronUp,
+  Info, ChevronDown,
 } from 'lucide-react'
 
 // ── Formatting helpers ────────────────────────────────────────
@@ -49,41 +49,61 @@ function StatusBadge({ status }) {
     : <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-gray-200 text-gray-600">Closed</span>
 }
 
-// ── Setup Guide ───────────────────────────────────────────────
-function SetupGuide() {
-  const [open, setOpen] = useState(true)
+// ── Workflow Guide (always-visible flow diagram) ──────────────
+function WorkflowGuide({ activeTab, onTabChange }) {
   const steps = [
-    { n: 1, title: 'Create SKUs', desc: 'Go to the SKUs page and create a bulk material SKU (e.g. "Coriander Powder Bulk") and a retail output SKU (e.g. "Coriander Powder 200g Case").', tab: null },
-    { n: 2, title: 'Add a Bill of Materials', desc: 'In the BOM tab, link your bulk SKU → retail SKU and enter how many kg of bulk are consumed per case packed (e.g. 4.0 kg/case for 20 × 200g sachets).', tab: 0 },
-    { n: 3, title: 'Record a Purchase / Shipment', desc: 'In the Purchases tab, create a new purchase batch. Add each bulk SKU received with its quantity and material cost. Enter shared freight and duty once — the system allocates them proportionally by weight and computes cost per kg per SKU.', tab: 1 },
-    { n: 4, title: 'Start a Packing Run', desc: 'In the Packing Runs tab, click "New Run". Select the bulk SKU, weigh it and enter the starting weight. Optionally link the landed cost batch for accurate costing.', tab: 2 },
-    { n: 5, title: 'Pack & Record Cases', desc: 'Add each product you packed and how many cases. The blue panel shows the expected weight remaining on the scale at all times.', tab: 2 },
-    { n: 6, title: 'Weigh & Close', desc: 'When done, weigh the leftover bulk and close the run. The system calculates variance and flags anything above your allowed waste %.', tab: 2 },
+    {
+      n: 1, emoji: '⚙️', label: 'Conversion Rates', tabIdx: 0,
+      sub: 'How many kg of bulk makes one retail case?',
+      tip: 'Example: 20 × 200g sachets = 4.0 kg/case. Set this once per product.',
+    },
+    {
+      n: 2, emoji: '📦', label: 'Record Purchase', tabIdx: 1,
+      sub: 'Log each bulk shipment — weight, cost, supplier.',
+      tip: 'Enter material cost per SKU + shared freight/duty once. The system splits shared costs by weight.',
+    },
+    {
+      n: 3, emoji: '🏭', label: 'Start Packing Run', tabIdx: 2,
+      sub: 'Weigh your bulk, pack retail cases, log each product.',
+      tip: 'Select the bulk material, enter starting weight, link the purchase you\'re drawing from.',
+    },
+    {
+      n: 4, emoji: '✅', label: 'Close & Review', tabIdx: 2,
+      sub: 'Weigh what\'s left on the scale, confirm & close.',
+      tip: 'The system calculates variance. Green = good, amber/red = investigate.',
+    },
   ]
   return (
-    <div className="mb-6 border border-blue-200 rounded-xl overflow-hidden">
-      <button
-        onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center justify-between px-4 py-3 bg-blue-50 text-blue-800 font-semibold text-sm hover:bg-blue-100 transition-colors"
-      >
-        <span className="flex items-center gap-2"><Info size={15} /> Getting Started — How to use Repacking</span>
-        {open ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
-      </button>
-      {open && (
-        <div className="p-4 bg-white">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {steps.map(s => (
-              <div key={s.n} className="flex gap-3 p-3 rounded-lg bg-gray-50 border border-gray-100">
-                <div className="flex-shrink-0 w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-bold flex items-center justify-center mt-0.5">{s.n}</div>
-                <div>
-                  <p className="font-semibold text-gray-800 text-sm">{s.title}</p>
-                  <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">{s.desc}</p>
-                </div>
+    <div className="mb-5 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-4">
+      <p className="text-xs font-semibold text-blue-700 uppercase tracking-wide mb-3 flex items-center gap-1.5">
+        <Info size={12} /> Follow these steps in order
+      </p>
+      <div className="flex items-stretch gap-1 overflow-x-auto pb-1">
+        {steps.map((s, idx) => (
+          <div key={s.n} className="flex items-center gap-1 flex-1 min-w-[110px]">
+            <button
+              type="button"
+              onClick={() => onTabChange(s.tabIdx)}
+              title={s.tip}
+              className={`flex-1 flex flex-col items-center text-center px-2 py-2.5 rounded-xl transition-all border-2 cursor-pointer ${
+                activeTab === s.tabIdx
+                  ? 'border-blue-500 bg-white shadow-sm'
+                  : 'border-transparent hover:border-blue-200 hover:bg-white/70'
+              }`}
+            >
+              <span className="text-xl mb-1">{s.emoji}</span>
+              <div className="flex items-center gap-1 justify-center mb-0.5">
+                <span className="w-4 h-4 rounded-full bg-blue-600 text-white text-[10px] font-bold flex items-center justify-center flex-shrink-0">{s.n}</span>
+                <span className="text-xs font-semibold text-gray-800 leading-tight">{s.label}</span>
               </div>
-            ))}
+              <p className="text-[11px] text-gray-500 leading-tight">{s.sub}</p>
+            </button>
+            {idx < steps.length - 1 && (
+              <span className="text-blue-300 text-lg font-light flex-shrink-0">›</span>
+            )}
           </div>
-        </div>
-      )}
+        ))}
+      </div>
     </div>
   )
 }
@@ -140,7 +160,7 @@ function SKUSearch({ skus, value, onChange, placeholder = 'Search SKU…', requi
   )
 }
 
-// ── Tab 1: Bills of Materials ─────────────────────────────────
+// ── Tab 1: Conversion Rates (Bills of Materials) ──────────────
 function BOMTab({ skus }) {
   const [boms, setBoms]         = useState([])
   const [loading, setLoading]   = useState(true)
@@ -223,7 +243,7 @@ function BOMTab({ skus }) {
   }
 
   const handleDelete = async (id) => {
-    if (!window.confirm('Delete this bill of materials?')) return
+    if (!window.confirm('Delete this conversion rate?')) return
     try { await repackingAPI.deleteBOM(id); load() }
     catch (e) { alert(e.response?.data?.detail || 'Failed to delete BOM') }
   }
@@ -232,49 +252,54 @@ function BOMTab({ skus }) {
     <div>
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h2 className="text-lg font-semibold text-gray-800">Bills of Materials</h2>
+          <h2 className="text-lg font-semibold text-gray-800">Conversion Rates</h2>
           <p className="text-sm text-gray-500 mt-0.5">
-            Define how much bulk material is consumed per retail unit packed.
+            Set how many kg of bulk goes into each retail case — the system uses this to calculate expected consumption and flag waste.
           </p>
         </div>
         <button onClick={openNew} className="btn-primary flex items-center gap-1.5">
-          <Plus size={15} /> Add BOM
+          <Plus size={15} /> Add Conversion Rate
         </button>
       </div>
 
       {showForm && (
         <div className="card mb-4 border border-blue-200 bg-blue-50">
           <h3 className="font-semibold text-gray-800 mb-3">
-            {editBomId ? '✏️ Edit Bill of Material' : 'New Bill of Material'}
+            {editBomId ? '✏️ Edit Conversion Rate' : '⚙️ New Conversion Rate'}
           </h3>
+          <p className="text-xs text-gray-500 mb-3">This tells the system how much bulk material (kg) is consumed when you pack one case of a retail product.</p>
           <form onSubmit={handleSubmit} className="space-y-3">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Output SKU (retail/finished) <span className="text-red-500">*</span></label>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Retail product (what you pack into cases) <span className="text-red-500">*</span></label>
                 <select className="input w-full" value={form.output_sku_id} onChange={e => setForm(f => ({ ...f, output_sku_id: e.target.value }))} required>
-                  <option value="">Select output SKU…</option>
+                  <option value="">Select retail SKU…</option>
                   {skus.map(s => <option key={s.id} value={s.id}>{s.product_name} ({s.sku_code})</option>)}
                 </select>
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Input SKU (bulk raw material) <span className="text-red-500">*</span></label>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Bulk material used to make it <span className="text-red-500">*</span></label>
                 <select className="input w-full" value={form.input_sku_id} onChange={e => setForm(f => ({ ...f, input_sku_id: e.target.value }))} required>
                   <option value="">Select bulk SKU…</option>
                   {skus.map(s => <option key={s.id} value={s.id}>{s.product_name} ({s.sku_code})</option>)}
                 </select>
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Bulk kg per case <span className="text-red-500">*</span></label>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Bulk consumed per case (kg) <span className="text-red-500">*</span></label>
                 <div className="flex gap-2">
                   <input type="number" step="0.001" min="0.001" className="input flex-1" placeholder="e.g. 4.0" value={form.qty_per_unit} onChange={e => setForm(f => ({ ...f, qty_per_unit: e.target.value }))} required />
                   <input type="text" className="input w-20" placeholder="kg" value={form.unit} onChange={e => setForm(f => ({ ...f, unit: e.target.value }))} />
                 </div>
-                <p className="text-xs text-gray-400 mt-1">Example: 20 × 200g sachets per case = 4.0 kg consumed per case packed.</p>
+                <p className="text-xs text-gray-400 mt-1">Example: 20 × 200g sachets per case = <strong>4.0 kg</strong> bulk consumed per case packed.</p>
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Allowed waste % (flag threshold)</label>
+                <label className="block text-xs font-medium text-gray-700 mb-1">
+                  Acceptable waste % <span className="text-gray-400 font-normal">(flag threshold)</span>
+                </label>
                 <input type="number" step="0.1" min="0" max="100" className="input w-full" value={form.waste_pct_allowed} onChange={e => setForm(f => ({ ...f, waste_pct_allowed: e.target.value }))} />
-                <p className="text-xs text-gray-400 mt-1">Variance above this % will be flagged red.</p>
+                <p className="text-xs text-gray-400 mt-1">
+                  If actual bulk used exceeds the expected amount by more than this %, the run is flagged red for investigation. It does not block anything — it's just a warning threshold.
+                </p>
               </div>
             </div>
             <div>
@@ -285,7 +310,7 @@ function BOMTab({ skus }) {
             <div className="flex gap-2">
               <button type="submit" className="btn-primary flex items-center gap-1.5" disabled={saving}>
                 {saving && <Loader2 size={14} className="animate-spin" />}
-                {editBomId ? 'Update BOM' : 'Save BOM'}
+                {editBomId ? 'Update' : 'Save Conversion Rate'}
               </button>
               <button type="button" className="btn-secondary" onClick={() => { setShowForm(false); setEditBomId(null) }}>Cancel</button>
             </div>
@@ -300,19 +325,19 @@ function BOMTab({ skus }) {
       ) : boms.length === 0 ? (
         <div className="card text-center py-12 text-gray-400">
           <Package size={36} className="mx-auto mb-3 opacity-30" />
-          <p className="font-medium">No bills of materials yet.</p>
-          <p className="text-sm mt-1">Add a BOM to define how much bulk is consumed per retail case.</p>
-          <button onClick={openNew} className="btn-primary mt-4 mx-auto">+ Add First BOM</button>
+          <p className="font-medium">No conversion rates set up yet.</p>
+          <p className="text-sm mt-1">Add your first conversion rate to tell the system how many kg of bulk go into each retail case.</p>
+          <button onClick={openNew} className="btn-primary mt-4 mx-auto">+ Add First Conversion Rate</button>
         </div>
       ) : (
         <div className="card p-0 overflow-hidden">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-xs text-gray-500 uppercase tracking-wide">
               <tr>
-                <th className="px-4 py-3 text-left">Output SKU (retail)</th>
-                <th className="px-4 py-3 text-left">Input SKU (bulk)</th>
+                <th className="px-4 py-3 text-left">Retail Product (output)</th>
+                <th className="px-4 py-3 text-left">Bulk Material (input)</th>
                 <th className="px-4 py-3 text-right">Bulk kg / case</th>
-                <th className="px-4 py-3 text-right">Waste allowed</th>
+                <th className="px-4 py-3 text-right">Waste flag %</th>
                 <th className="px-4 py-3 text-left">Notes</th>
                 <th className="px-4 py-3" />
               </tr>
@@ -972,7 +997,10 @@ function OperationalCostsCard({ runDetail, onSaved }) {
       </div>
 
       <div>
-        <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-3">Section A — Packing Run Costs</p>
+        <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-3">
+          Packing Run Costs
+          <span className="ml-1 normal-case font-normal text-gray-400">— packaging, labour &amp; overhead for this run</span>
+        </p>
         <form onSubmit={handleSave} className="space-y-3">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {[
@@ -1018,7 +1046,10 @@ function OperationalCostsCard({ runDetail, onSaved }) {
       </div>
 
       <div>
-        <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-3">Section B — Full Cost Breakdown</p>
+        <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-3">
+          Full Cost Summary
+          <span className="ml-1 normal-case font-normal text-gray-400">— bulk material + packing costs combined (available after closing the run)</span>
+        </p>
         {runDetail.status === 'open' ? (
           <div className="text-sm text-gray-500 italic bg-gray-50 rounded-lg p-3">
             Cost breakdown will be available once you close the run.
@@ -1029,7 +1060,8 @@ function OperationalCostsCard({ runDetail, onSaved }) {
           <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-start gap-2 text-sm text-amber-800">
             <AlertTriangle size={15} className="mt-0.5 shrink-0" />
             <span>
-              No landed cost found for <strong>{summary.bulk_sku_name || 'the bulk materials in this run'}</strong> — record a purchase in the <strong>Purchases</strong> tab first, then the cost breakdown will appear here.
+              No purchase cost found for <strong>{summary.bulk_sku_name || 'the bulk materials in this run'}</strong>.
+              {' '}Go to the <strong>Purchases</strong> tab and record the purchase you used — then come back here to see the full cost breakdown.
             </span>
           </div>
         ) : summary ? (
@@ -1706,28 +1738,28 @@ function RunsTab({ skus, landedCosts }) {
           <form onSubmit={handleCreateRun} className="space-y-3">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Run Reference (order name / batch label)</label>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Run name / reference <span className="text-gray-400 font-normal">(optional)</span></label>
                 <input type="text" className="input w-full" placeholder="e.g. ORD-2026-001 or Batch A" value={runForm.run_ref} onChange={e => setRunForm(f => ({ ...f, run_ref: e.target.value }))} />
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Bulk Material SKU <span className="text-red-500">*</span></label>
+                <label className="block text-xs font-medium text-gray-700 mb-1">What bulk material are you packing? <span className="text-red-500">*</span></label>
                 <select className="input w-full" value={runForm.bulk_sku_id} onChange={e => setRunForm(f => ({ ...f, bulk_sku_id: e.target.value, landed_cost_id: '' }))} required>
                   <option value="">Select bulk material…</option>
                   {skus.map(s => <option key={s.id} value={s.id}>{s.product_name} ({s.sku_code})</option>)}
                 </select>
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Starting Weight (kg) <span className="text-red-500">*</span></label>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Weigh your bulk now — enter starting weight (kg) <span className="text-red-500">*</span></label>
                 <input type="number" step="0.001" min="0.001" className="input w-full" placeholder="e.g. 1000" value={runForm.qty_start} onChange={e => setRunForm(f => ({ ...f, qty_start: e.target.value }))} required />
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">
-                  Link Landed Cost Batch
-                  <span className="ml-1 text-xs text-gray-400 font-normal">(optional — for accurate costing)</span>
+                  Which purchase did this bulk come from?
+                  <span className="ml-1 text-xs text-gray-400 font-normal">(optional — links cost/kg for accurate breakdown)</span>
                 </label>
                 {runForm.bulk_sku_id && matchingLandedCosts.length === 0 ? (
                   <div className="text-xs text-amber-600 italic mt-1 flex items-center gap-1">
-                    <AlertTriangle size={12} /> No landed costs recorded for this SKU — add one in the Landed Costs tab.
+                    <AlertTriangle size={12} /> No purchases recorded for this bulk SKU yet — go to the <strong>Purchases</strong> tab and add one first.
                   </div>
                 ) : (
                   <select
@@ -1736,10 +1768,10 @@ function RunsTab({ skus, landedCosts }) {
                     onChange={e => setRunForm(f => ({ ...f, landed_cost_id: e.target.value }))}
                     disabled={!runForm.bulk_sku_id || matchingLandedCosts.length === 0}
                   >
-                    <option value="">Use most recent batch automatically</option>
+                    <option value="">Auto-pick most recent purchase for this SKU</option>
                     {matchingLandedCosts.map(lc => (
                       <option key={lc.id} value={lc.id}>
-                        {lc.batch_ref || `LC #${lc.id}`} · {lc.bulk_sku_name} — ${(+lc.cost_per_kg).toFixed(4)}/kg · {(+lc.qty_kg).toFixed(0)} kg · {new Date(lc.created_at).toLocaleDateString()}
+                        {lc.batch_ref || `Purchase #${lc.id}`} · {(+lc.qty_kg).toFixed(0)} kg · ${(+lc.cost_per_kg).toFixed(4)}/kg · {new Date(lc.created_at).toLocaleDateString()}
                       </option>
                     ))}
                   </select>
@@ -2096,7 +2128,7 @@ function SummaryTab() {
 }
 
 // ── Main Repacking page ───────────────────────────────────────
-const TABS = ['Bills of Materials', 'Purchases', 'Packing Runs', 'Summary']
+const TABS = ['Conversion Rates', 'Purchases', 'Packing Runs', 'Summary']
 
 export default function Repacking() {
   const [activeTab, setActiveTab]       = useState(2)
@@ -2164,7 +2196,7 @@ export default function Repacking() {
         </div>
       )}
 
-      <SetupGuide />
+      <WorkflowGuide activeTab={activeTab} onTabChange={handleTabChange} />
 
       <div className="flex gap-1 mb-6 bg-gray-100 rounded-xl p-1 w-fit">
         {TABS.map((tab, i) => (
