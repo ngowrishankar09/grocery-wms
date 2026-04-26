@@ -179,6 +179,8 @@ def _migrate():
         ("packing_runs",        "units_planned",  "INTEGER"),
         ("packing_run_outputs", "units_packed",   "INTEGER"),
         ("packing_run_outputs", "units_planned",  "INTEGER"),
+        # Bulk/raw material flag — distinguishes raw inputs from retail SKUs
+        ("skus", "is_bulk_material", "BOOLEAN DEFAULT FALSE"),
     ]
     # Use IF NOT EXISTS for PostgreSQL (idempotent); fall back to try/except for SQLite
     add_col = "ADD COLUMN IF NOT EXISTS" if is_postgres else "ADD COLUMN"

@@ -97,6 +97,7 @@ class SKU(Base):
     show_goods_date_on_picking = Column(Boolean, default=False)  # show expiry/goods date to picker
     require_expiry_entry       = Column(Boolean, default=False)  # picker must enter expiry date
     floor_price     = Column(Float, nullable=True)   # min price below which approval required
+    is_bulk_material = Column(Boolean, default=False)  # True = raw/bulk input (not sold directly)
     is_active       = Column(Boolean, default=True)
     created_at      = Column(DateTime, default=datetime.utcnow)
 

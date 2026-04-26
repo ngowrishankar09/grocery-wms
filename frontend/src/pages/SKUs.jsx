@@ -165,6 +165,7 @@ const BLANK_FORM = {
   reorder_point: 10, reorder_qty: 50, max_stock: 200, lead_time_days: 7, vendor_id: '',
   cost_price: '', selling_price: '',
   unit_weight: '', unit_weight_uom: 'g',
+  is_bulk_material: false,
   show_goods_date_on_picking: false,
   require_expiry_entry: false,
   initial_wh1: '', initial_wh2: '',
@@ -747,6 +748,23 @@ function SKUFormModal({ form, editId, categories, vendors, bins, saving, onSet, 
                 )}
               </div>
 
+              {/* Bulk / raw material flag */}
+              <div className="flex items-start gap-3 bg-blue-50 border border-blue-200 rounded-xl p-3">
+                <input
+                  type="checkbox"
+                  id="is_bulk_material"
+                  className="mt-0.5 w-4 h-4 accent-blue-600 flex-shrink-0"
+                  checked={!!form.is_bulk_material}
+                  onChange={e => onSet('is_bulk_material', e.target.checked)}
+                />
+                <label htmlFor="is_bulk_material" className="text-sm cursor-pointer">
+                  <span className="font-semibold text-blue-800">This is a raw / bulk material</span>
+                  <p className="text-xs text-blue-600 mt-0.5">
+                    Check this for items you buy in bulk (e.g. 25 kg sack of chilli powder) that are used as ingredients in repacking — not sold directly to customers.
+                  </p>
+                </label>
+              </div>
+
               {/* Show goods date on picking toggle */}
               <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-xl p-3">
                 <input
@@ -1082,6 +1100,7 @@ export default function SKUs({ lang }) {
       selling_price: form.selling_price !== '' && form.selling_price !== null ? parseFloat(form.selling_price) : null,
       show_goods_date_on_picking: !!form.show_goods_date_on_picking,
       require_expiry_entry: !!form.require_expiry_entry,
+      is_bulk_material: !!form.is_bulk_material,
       unit_weight: form.unit_weight !== '' && form.unit_weight !== null ? parseFloat(form.unit_weight) : null,
       unit_weight_uom: form.unit_weight_uom || 'g',
     }
@@ -1121,7 +1140,7 @@ export default function SKUs({ lang }) {
   }
 
   const startEdit = (sku) => {
-    setForm({ ...BLANK_FORM, ...sku, vendor_id: sku.vendor_id || '', pallet_size: sku.pallet_size ?? '', cost_price: sku.cost_price ?? '', selling_price: sku.selling_price ?? '', show_goods_date_on_picking: sku.show_goods_date_on_picking ?? false, require_expiry_entry: sku.require_expiry_entry ?? false, unit_weight: sku.unit_weight ?? '', unit_weight_uom: sku.unit_weight_uom || 'g' })
+    setForm({ ...BLANK_FORM, ...sku, vendor_id: sku.vendor_id || '', pallet_size: sku.pallet_size ?? '', cost_price: sku.cost_price ?? '', selling_price: sku.selling_price ?? '', show_goods_date_on_picking: sku.show_goods_date_on_picking ?? false, require_expiry_entry: sku.require_expiry_entry ?? false, is_bulk_material: sku.is_bulk_material ?? false, unit_weight: sku.unit_weight ?? '', unit_weight_uom: sku.unit_weight_uom || 'g' })
     setEditId(sku.id)
     setShowForm(true)
   }

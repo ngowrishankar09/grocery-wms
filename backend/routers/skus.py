@@ -36,6 +36,7 @@ class SKUCreate(BaseModel):
     require_expiry_entry: bool = False
     unit_weight: Optional[float] = None
     unit_weight_uom: Optional[str] = "g"
+    is_bulk_material: Optional[bool] = False
 
 class SKUUpdate(BaseModel):
     barcode: Optional[str] = None
@@ -59,6 +60,7 @@ class SKUUpdate(BaseModel):
     require_expiry_entry: Optional[bool] = None
     unit_weight: Optional[float] = None
     unit_weight_uom: Optional[str] = None
+    is_bulk_material: Optional[bool] = None
 
 # ─── Endpoints ────────────────────────────────────────────────
 @router.get("/")
@@ -112,6 +114,7 @@ def list_skus(
             "require_expiry_entry": getattr(sku, 'require_expiry_entry', False),
             "unit_weight": getattr(sku, 'unit_weight', None),
             "unit_weight_uom": getattr(sku, 'unit_weight_uom', 'g') or 'g',
+            "is_bulk_material": getattr(sku, 'is_bulk_material', False) or False,
             "image_url": sku.image_url,
             "is_active": sku.is_active,
             "wh1_cases": wh1,
@@ -172,6 +175,7 @@ def lookup_by_barcode(
         "cost_price": sku.cost_price,
         "selling_price": getattr(sku, "selling_price", None),
         "floor_price": getattr(sku, "floor_price", None),
+        "is_bulk_material": getattr(sku, "is_bulk_material", False) or False,
         "wh1_cases": wh1,
         "wh2_cases": wh2,
         "total_cases": wh1 + wh2,
