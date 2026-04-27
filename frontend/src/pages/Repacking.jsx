@@ -2995,37 +2995,41 @@ export default function Repacking() {
   const [runCount, setRunCount]         = useState(0)
   const [runPreFill, setRunPreFill]     = useState(null)  // { landed_cost_id, bulk_sku_id, batchRef, bulkSkuName }
 
-  // Load everything on mount
+  // Load everything on mount — SKUs unblock the page first, counts update in background
   useEffect(() => {
-    const init = async () => {
-      try {
-        const [skuRes, lcRes, sumRes, bomRes, purchRes] = await Promise.all([
-          skuAPI.list({ limit: 500 }),
-          repackingAPI.listLandedCosts(),
-          repackingAPI.summary({}),
-          repackingAPI.listBOM(),
-          repackingAPI.listPurchases(),
-        ])
-        const items = Array.isArray(skuRes.data) ? skuRes.data : (skuRes.data?.items || skuRes.data?.skus || [])
+    // Priority 1: SKUs — lean mode (no inventory join) for fast dropdowns
+    skuAPI.list({ lean: true })
+      .then(res => {
+        const items = Array.isArray(res.data) ? res.data : (res.data?.items || res.data?.skus || [])
         setSkus(items)
-        setLandedCosts(Array.isArray(lcRes.data) ? lcRes.data : [])
-        setFlaggedCount(sumRes.data?.flagged_runs ?? 0)
-        setRunCount(sumRes.data?.total_runs ?? 0)
-        setBomCount(Array.isArray(bomRes.data) ? bomRes.data.length : 0)
-        setPurchaseCount(Array.isArray(purchRes.data) ? purchRes.data.length : 0)
-      } catch {
-        setSkus([])
-        setLandedCosts([])
-      } finally {
-        setSkusLoading(false)
-      }
-    }
-    init()
+      })
+      .catch(() => setSkus([]))
+      .finally(() => setSkusLoading(false))
+
+    // Priority 2: background — each updates independently, never blocks the page
+    repackingAPI.listLandedCosts()
+      .then(res => setLandedCosts(Array.isArray(res.data) ? res.data : []))
+      .catch(() => {})
+
+    repackingAPI.summary({})
+      .then(res => {
+        setFlaggedCount(res.data?.flagged_runs ?? 0)
+        setRunCount(res.data?.total_runs ?? 0)
+      })
+      .catch(() => {})
+
+    repackingAPI.listBOM()
+      .then(res => setBomCount(Array.isArray(res.data) ? res.data.length : 0))
+      .catch(() => {})
+
+    repackingAPI.listPurchases()
+      .then(res => setPurchaseCount(Array.isArray(res.data) ? res.data.length : 0))
+      .catch(() => {})
   }, [])
 
   const refreshSkus = async () => {
     try {
-      const res = await skuAPI.list({ limit: 500 })
+      const res = await skuAPI.list({ lean: true })
       const items = Array.isArray(res.data) ? res.data : (res.data?.items || res.data?.skus || [])
       setSkus(items)
     } catch {}

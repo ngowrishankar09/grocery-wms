@@ -67,6 +67,7 @@ class SKUUpdate(BaseModel):
 def list_skus(
     search: Optional[str] = None,
     category: Optional[str] = None,
+    lean: Optional[bool] = False,
     db: Session = Depends(get_db),
     company_id: int = Depends(get_company_id),
 ):
@@ -81,15 +82,46 @@ def list_skus(
 
     skus = q.order_by(SKU.category, SKU.product_name).all()
 
+    # lean=true skips inventory join (used by pages that only need SKU metadata)
+    if lean:
+        return [
+            {
+                "id": sku.id,
+                "sku_code": sku.sku_code,
+                "product_name": sku.product_name,
+                "name_es": sku.name_es,
+                "category": sku.category,
+                "case_size": sku.case_size,
+                "unit_label": sku.unit_label,
+                "vendor_id": sku.vendor_id,
+                "cost_price": sku.cost_price,
+                "selling_price": getattr(sku, 'selling_price', None),
+                "floor_price": getattr(sku, 'floor_price', None),
+                "unit_weight": getattr(sku, 'unit_weight', None),
+                "unit_weight_uom": getattr(sku, 'unit_weight_uom', 'g') or 'g',
+                "is_bulk_material": getattr(sku, 'is_bulk_material', False) or False,
+                "is_active": sku.is_active,
+            }
+            for sku in skus
+        ]
+
+    # Full mode: load ALL inventory in ONE query instead of N queries
+    sku_ids = [s.id for s in skus]
+    inv_rows = (
+        db.query(Inventory)
+        .filter(Inventory.company_id == company_id, Inventory.sku_id.in_(sku_ids))
+        .all()
+    ) if sku_ids else []
+
+    inv_map: dict = {}
+    for inv in inv_rows:
+        inv_map.setdefault(inv.sku_id, {})[inv.warehouse] = inv.cases_on_hand
+
     result = []
     for sku in skus:
-        inv = db.query(Inventory).filter(
-            Inventory.sku_id == sku.id,
-            Inventory.company_id == company_id,
-        ).all()
-        wh1 = next((i.cases_on_hand for i in inv if i.warehouse == "WH1"), 0)
-        wh2 = next((i.cases_on_hand for i in inv if i.warehouse == "WH2"), 0)
-
+        sku_inv = inv_map.get(sku.id, {})
+        wh1 = sku_inv.get("WH1", 0)
+        wh2 = sku_inv.get("WH2", 0)
         result.append({
             "id": sku.id,
             "sku_code": sku.sku_code,
