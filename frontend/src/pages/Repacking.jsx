@@ -211,6 +211,74 @@ function CostLineRow({ line, idx, onChange, onRemove, onFetchFx, fetchingFx }) {
   )
 }
 
+// ── Inline weight setter — shown when a retail SKU has no unit_weight ────────
+function InlineWeightSetter({ sku, qtyMode, onApply }) {
+  const [weight, setWeight] = useState('')
+  const [uom, setUom]       = useState('g')
+  const [saving, setSaving] = useState(false)
+  const [done, setDone]     = useState(false)
+
+  const handle = async () => {
+    const w = parseFloat(weight)
+    if (!w || w <= 0) return
+    setSaving(true)
+    try {
+      // Save to SKU Master (best-effort — if column not on server yet, still fill locally)
+      try { await skuAPI.update(sku.id, { unit_weight: w, unit_weight_uom: uom }) } catch {}
+      const kgPerUnit = toKg(w, uom)
+      onApply(kgPerUnit)
+      setDone(true)
+    } finally { setSaving(false) }
+  }
+
+  if (done) return (
+    <p className="text-xs text-emerald-600 mt-1">✓ Weight saved — bulk qty auto-filled</p>
+  )
+
+  const preview = (() => {
+    const w = parseFloat(weight)
+    if (!w) return null
+    const kgPerUnit = toKg(w, uom)
+    if (!kgPerUnit) return null
+    if (qtyMode === 'case' && sku.case_size)
+      return `${sku.case_size} × ${w}${uom} = ${(kgPerUnit * sku.case_size).toFixed(3)} kg/case`
+    return `${w}${uom} = ${kgPerUnit.toFixed(4)} kg/unit`
+  })()
+
+  return (
+    <div className="mt-1.5 rounded-lg border border-amber-200 bg-amber-50 p-2 space-y-1.5">
+      <p className="text-xs text-amber-700 font-medium flex items-center gap-1">
+        <AlertTriangle size={11} /> No unit weight in SKU Master — set it once to enable auto-fill forever
+      </p>
+      <div className="flex items-center gap-1.5">
+        <span className="text-xs text-gray-600 whitespace-nowrap">1 unit weighs:</span>
+        <input
+          type="number" min="0.001" step="0.001"
+          className="input text-sm w-20 py-1"
+          placeholder="200"
+          value={weight}
+          onChange={e => setWeight(e.target.value)}
+        />
+        <select className="input text-sm w-16 py-1" value={uom} onChange={e => setUom(e.target.value)}>
+          <option value="g">g</option>
+          <option value="kg">kg</option>
+          <option value="oz">oz</option>
+          <option value="lbs">lbs</option>
+        </select>
+        <button
+          type="button"
+          disabled={!weight || saving}
+          onClick={handle}
+          className="text-xs font-semibold px-2 py-1 rounded-lg bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-40 whitespace-nowrap"
+        >
+          {saving ? '…' : 'Use & Save'}
+        </button>
+      </div>
+      {preview && <p className="text-xs text-blue-600">→ {preview}</p>}
+    </div>
+  )
+}
+
 // ── Tab 1: Bill of Materials (Bulk → Retail yields) ───────────
 function BOMTab({ skus, refreshSkus }) {
   const [boms, setBoms]           = useState([])
@@ -541,6 +609,25 @@ function BOMTab({ skus, refreshSkus }) {
                           ✓ {preview.label}
                         </p>
                       )}
+                      {/* Inline weight setter — shown when SKU selected but unit_weight missing */}
+                      {row.output_sku_id && (() => {
+                        const outSku = skus.find(s => String(s.id) === String(row.output_sku_id))
+                        if (!outSku || outSku.unit_weight) return null
+                        return (
+                          <InlineWeightSetter
+                            sku={outSku}
+                            qtyMode={row.qtyMode}
+                            onApply={(kgPerUnit) => {
+                              const newQty = row.qtyMode === 'case' && outSku.case_size
+                                ? (kgPerUnit * outSku.case_size).toFixed(4)
+                                : kgPerUnit.toFixed(4)
+                              updateRow(idx, { qty_per_unit: newQty })
+                              // Also refresh skus so future rows auto-fill too
+                              refreshSkus()
+                            }}
+                          />
+                        )
+                      })()}
                     </div>
 
                     {/* Qty used + unit */}
