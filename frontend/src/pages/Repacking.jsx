@@ -383,7 +383,8 @@ function BOMTab({ skus, refreshSkus, onGoToStock }) {
   const openNew = (prefillBulkId = '') => {
     setEditBomId(null)
     setForm({ input_sku_id: prefillBulkId ? String(prefillBulkId) : '', rows: [emptyRow()] })
-    setCustomBulkName(''); setCustomBulkWeight(''); setCustomBulkWeightUom('kg')
+    setCustomBulkName(''); setCustomBulkWeight(''); setCustomBulkWeightUom('kg'); setCustomBulkCostPerKg('')
+    setBulkCostInput(''); setCreatingNewBulk(false)
     setFormError(null); setShowForm(true)
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
@@ -402,7 +403,8 @@ function BOMTab({ skus, refreshSkus, onGoToStock }) {
         qtyMode: 'case',
       }],
     })
-    setCustomBulkName(''); setCustomBulkWeight(''); setCustomBulkWeightUom('kg')
+    setCustomBulkName(''); setCustomBulkWeight(''); setCustomBulkWeightUom('kg'); setCustomBulkCostPerKg('')
+    setBulkCostInput(''); setCreatingNewBulk(false)
     setFormError(null); setShowForm(true)
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
@@ -443,9 +445,9 @@ function BOMTab({ skus, refreshSkus, onGoToStock }) {
 
     // ── Step 2: validate rows ────────────────────────────────
     const validRows = form.rows.filter(r => r.output_sku_id && r.qty_per_unit)
-    if (validRows.length === 0) { setFormError('Please fill in at least one retail product row.'); return }
+    if (validRows.length === 0) { setFormError('Please fill in at least one retail product row.'); setSaving(false); return }
     const dupInForm = validRows.map(r => r.output_sku_id).filter((v, i, a) => a.indexOf(v) !== i)
-    if (dupInForm.length) { setFormError('You have the same retail product in more than one row.'); return }
+    if (dupInForm.length) { setFormError('You have the same retail product in more than one row.'); setSaving(false); return }
 
     // ── Step 3: save ─────────────────────────────────────────
     setSaving(true)
