@@ -920,7 +920,8 @@ function PurchasesTab({ skus, onStartPacking, preFillSkuId }) {
   const [saving, setSaving]         = useState(false)
   const [formError, setFormError]   = useState(null)
   const [deleting, setDeleting]     = useState(null)
-  const [bomInputIds, setBomInputIds] = useState([])  // input_sku_ids from BOM — catches non-flagged bulk SKUs
+  const [bomInputIds, setBomInputIds]   = useState([])            // input_sku_ids — catches non-flagged bulk SKUs
+  const [bomsByInput, setBomsByInput]   = useState({})            // { input_sku_id: [bom,...] } for retail-pack hints
 
   const emptyCostLine = () => ({ description: '', amount: '', currency: 'USD', fx_rate_to_usd: '1', sort_order: 0 })
   const emptyLine = () => ({ bulk_sku_id: '', qty_kg: '', qty_uom: 'kg', bag_weight_kg: '', cost_material: '', cost_packaging_mat: '', cost_labor: '' })
@@ -980,11 +981,14 @@ function PurchasesTab({ skus, onStartPacking, preFillSkuId }) {
 
   useEffect(() => {
     load()
-    // Load BOM to find any SKUs used as raw material that aren't flagged is_bulk_material yet
+    // Load BOM — (1) surface non-flagged bulk SKUs, (2) build retail-pack hints per input SKU
     repackingAPI.listBOM()
       .then(res => {
-        const ids = [...new Set((Array.isArray(res.data) ? res.data : []).map(b => b.input_sku_id))]
-        setBomInputIds(ids)
+        const data = Array.isArray(res.data) ? res.data : []
+        setBomInputIds([...new Set(data.map(b => b.input_sku_id))])
+        const grouped = {}
+        data.forEach(b => { const k = String(b.input_sku_id); grouped[k] = [...(grouped[k] || []), b] })
+        setBomsByInput(grouped)
       })
       .catch(() => {})
   }, [load])
@@ -1342,6 +1346,23 @@ function PurchasesTab({ skus, onStartPacking, preFillSkuId }) {
                                   <span className="text-xs text-gray-400 font-normal">{sku.sku_code}</span>
                                   {isSelected && <CheckCircle2 size={14} className="text-blue-500 ml-1" />}
                                 </button>
+                              )
+                            })}
+                          </div>
+                        )}
+                        {/* Show retail packs that will be produced from the selected bulk material */}
+                        {line.bulk_sku_id && (bomsByInput[line.bulk_sku_id] || []).length > 0 && (
+                          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                            <span className="text-xs text-gray-400">Will pack into:</span>
+                            {(bomsByInput[line.bulk_sku_id] || []).map(b => {
+                              const retailSku = skus.find(s => s.id === b.output_sku_id)
+                              return (
+                                <span key={b.id} className="inline-flex items-center gap-1 text-xs bg-indigo-50 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded-lg">
+                                  {b.output_sku_name}
+                                  {retailSku?.case_size && retailSku?.unit_weight
+                                    ? <span className="text-indigo-400">{retailSku.case_size}×{retailSku.unit_weight}{retailSku.unit_weight_uom||'g'}</span>
+                                    : null}
+                                </span>
                               )
                             })}
                           </div>
