@@ -280,7 +280,7 @@ function InlineWeightSetter({ sku, qtyMode, onApply }) {
 }
 
 // ── Tab 1: Bill of Materials (Bulk → Retail yields) ───────────
-function BOMTab({ skus, refreshSkus }) {
+function BOMTab({ skus, refreshSkus, onGoToStock }) {
   const [boms, setBoms]           = useState([])
   const [loading, setLoading]     = useState(true)
   const [error, setError]         = useState(null)
@@ -293,6 +293,8 @@ function BOMTab({ skus, refreshSkus }) {
   const [customBulkName, setCustomBulkName]           = useState('')
   const [customBulkWeight, setCustomBulkWeight]       = useState('')
   const [customBulkWeightUom, setCustomBulkWeightUom] = useState('kg')
+  const [customBulkCostPerKg, setCustomBulkCostPerKg] = useState('')
+  const [bulkCostInput, setBulkCostInput]             = useState('')  // cost/kg for existing bulk SKU
 
   // ── Form state ───────────────────────────────────────────────
   // input_sku_id: the one bulk material selected for this form session
@@ -372,7 +374,8 @@ function BOMTab({ skus, refreshSkus }) {
 
   const resetForm = () => {
     setForm(emptyForm)
-    setCustomBulkName(''); setCustomBulkWeight(''); setCustomBulkWeightUom('kg')
+    setCustomBulkName(''); setCustomBulkWeight(''); setCustomBulkWeightUom('kg'); setCustomBulkCostPerKg('')
+    setBulkCostInput('')
     setFormError(null)
   }
 
@@ -420,6 +423,7 @@ function BOMTab({ skus, refreshSkus }) {
           unit_weight:     customBulkWeight ? parseFloat(customBulkWeight) : null,
           unit_weight_uom: customBulkWeightUom || 'kg',
           is_bulk_material: true,
+          cost_price: customBulkCostPerKg ? parseFloat(customBulkCostPerKg) : null,
         })
         resolvedInputSkuId = String(skuRes.data.id)
         await refreshSkus()
@@ -429,6 +433,12 @@ function BOMTab({ skus, refreshSkus }) {
       }
     }
     if (!resolvedInputSkuId) { setFormError('Please select a bulk material.'); setSaving(false); return }
+
+    // If user entered a cost/kg for an existing bulk SKU, save it now
+    if (hasBulkFlag && bulkCostInput) {
+      try { await skuAPI.update(parseInt(resolvedInputSkuId), { cost_price: parseFloat(bulkCostInput) }) }
+      catch {}  // best-effort — don't block BOM save
+    }
 
     // ── Step 2: validate rows ────────────────────────────────
     const validRows = form.rows.filter(r => r.output_sku_id && r.qty_per_unit)
@@ -524,7 +534,7 @@ function BOMTab({ skus, refreshSkus }) {
             <div className="bg-gray-50 border border-gray-200 rounded-xl p-3 space-y-2">
               <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Step 1 — Raw material you buy in bulk</p>
               {!hasBulkFlag ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   <div>
                     <label className="block text-xs text-gray-600 mb-1">Material name <span className="text-red-500">*</span></label>
                     <input type="text" className="input w-full" placeholder="e.g. Chilli Powder"
@@ -544,18 +554,40 @@ function BOMTab({ skus, refreshSkus }) {
                       </select>
                     </div>
                   </div>
+                  <div>
+                    <label className="block text-xs text-gray-600 mb-1">Cost per kg ($) <span className="text-gray-400 font-normal">optional</span></label>
+                    <input type="number" step="0.01" min="0" className="input w-full" placeholder="e.g. 2.50"
+                      value={customBulkCostPerKg} onChange={e => setCustomBulkCostPerKg(e.target.value)} />
+                    <p className="text-xs text-gray-400 mt-1">Pre-fills Material Cost in Stock Received.</p>
+                  </div>
                 </div>
               ) : (
-                <div>
-                  <label className="block text-xs text-gray-600 mb-1">Select bulk material <span className="text-red-500">*</span></label>
-                  <select className="input w-full md:w-1/2"
-                    value={form.input_sku_id}
-                    onChange={e => setForm(f => ({ ...f, input_sku_id: e.target.value, rows: [emptyRow()] }))}
-                    required disabled={!!editBomId}
-                  >
-                    <option value="">Select…</option>
-                    {bulkSkuList.map(s => <option key={s.id} value={s.id}>{s.product_name} ({s.sku_code})</option>)}
-                  </select>
+                <div className="flex flex-wrap gap-3 items-end">
+                  <div className="flex-1 min-w-[200px]">
+                    <label className="block text-xs text-gray-600 mb-1">Select bulk material <span className="text-red-500">*</span></label>
+                    <select className="input w-full"
+                      value={form.input_sku_id}
+                      onChange={e => { setForm(f => ({ ...f, input_sku_id: e.target.value, rows: [emptyRow()] })); setBulkCostInput('') }}
+                      required disabled={!!editBomId}
+                    >
+                      <option value="">Select…</option>
+                      {bulkSkuList.map(s => <option key={s.id} value={s.id}>{s.product_name} ({s.sku_code})</option>)}
+                    </select>
+                  </div>
+                  {form.input_sku_id && (() => {
+                    const selSku = skus.find(s => String(s.id) === String(form.input_sku_id))
+                    return (
+                      <div className="w-40">
+                        <label className="block text-xs text-gray-600 mb-1">
+                          Cost per kg ($)
+                          {selSku?.cost_price ? <span className="text-green-600 ml-1">✓ ${selSku.cost_price}/kg saved</span> : <span className="text-gray-400 font-normal ml-1">optional</span>}
+                        </label>
+                        <input type="number" step="0.01" min="0" className="input w-full"
+                          placeholder={selSku?.cost_price ? String(selSku.cost_price) : 'e.g. 2.50'}
+                          value={bulkCostInput} onChange={e => setBulkCostInput(e.target.value)} />
+                      </div>
+                    )
+                  })()}
                 </div>
               )}
             </div>
@@ -751,12 +783,23 @@ function BOMTab({ skus, refreshSkus }) {
                     {group.outputs.length} retail pack{group.outputs.length !== 1 ? 's' : ''}
                   </span>
                 </div>
-                <button
-                  onClick={() => openNew(group.bulk_id)}
-                  className="text-xs text-blue-600 hover:text-blue-800 border border-blue-200 hover:border-blue-400 px-2.5 py-1 rounded-lg transition-colors flex items-center gap-1"
-                >
-                  <Plus size={11} /> Add retail product
-                </button>
+                <div className="flex items-center gap-2">
+                  {onGoToStock && (
+                    <button
+                      type="button"
+                      onClick={() => onGoToStock(group.bulk_id)}
+                      className="text-xs text-green-700 hover:text-green-900 border border-green-300 hover:border-green-500 bg-green-50 hover:bg-green-100 px-2.5 py-1 rounded-lg transition-colors flex items-center gap-1 font-medium"
+                    >
+                      Log delivery →
+                    </button>
+                  )}
+                  <button
+                    onClick={() => openNew(group.bulk_id)}
+                    className="text-xs text-blue-600 hover:text-blue-800 border border-blue-200 hover:border-blue-400 px-2.5 py-1 rounded-lg transition-colors flex items-center gap-1"
+                  >
+                    <Plus size={11} /> Add retail product
+                  </button>
+                </div>
               </div>
 
               {/* Retail outputs table */}
@@ -821,7 +864,7 @@ function BOMTab({ skus, refreshSkus }) {
 }
 
 // ── Tab 2: Purchases / Shipments ─────────────────────────────
-function PurchasesTab({ skus, onStartPacking }) {
+function PurchasesTab({ skus, onStartPacking, preFillSkuId }) {
   const [purchases, setPurchases]   = useState([])
   const [loading, setLoading]       = useState(true)
   const [error, setError]           = useState(null)
@@ -901,6 +944,16 @@ function PurchasesTab({ skus, onStartPacking }) {
       .catch(() => {})
   }, [load])
 
+  // When navigated from My Products "Log delivery →", auto-open form pre-selecting that bulk SKU
+  useEffect(() => {
+    if (!preFillSkuId) return
+    setEditId(null)
+    setForm({ ...emptyForm(), lines: [{ ...emptyLine(), bulk_sku_id: String(preFillSkuId) }] })
+    setFormError(null)
+    setShowForm(true)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }, [preFillSkuId]) // eslint-disable-line
+
   // Live cost-per-kg preview for one line
   const calcLinePreview = (lineIdx) => {
     const line   = form.lines[lineIdx]
@@ -928,7 +981,26 @@ function PurchasesTab({ skus, onStartPacking }) {
     setForm(f => ({ ...f, lines: f.lines.filter((_, idx) => idx !== i) }))
   }
   const updateLine = (i, key, val) => setForm(f => {
-    const lines = [...f.lines]; lines[i] = { ...lines[i], [key]: val }; return { ...f, lines }
+    const lines = [...f.lines]
+    lines[i] = { ...lines[i], [key]: val }
+
+    // Auto-fill Material Cost from SKU's standard cost_price when qty or SKU changes
+    if (key === 'qty_kg' || key === 'bulk_sku_id') {
+      const line = lines[i]
+      const sku = skus.find(s => String(s.id) === String(line.bulk_sku_id))
+      if (sku?.cost_price && !parseFloat(line.cost_material)) {
+        const qty = parseFloat(line.qty_kg) || 0
+        const uom = line.qty_uom || 'kg'
+        let kg = qty
+        if (uom === 'g')    kg = qty / 1000
+        else if (uom === 'lbs') kg = qty * 0.453592
+        else if (uom === 'oz')  kg = qty * 0.0283495
+        else if (uom === 'bags') kg = qty * (parseFloat(line.bag_weight_kg) || 0)
+        if (kg > 0) lines[i] = { ...lines[i], cost_material: (kg * sku.cost_price).toFixed(2) }
+      }
+    }
+
+    return { ...f, lines }
   })
 
   const openNew = () => {
@@ -1290,6 +1362,11 @@ function PurchasesTab({ skus, onStartPacking }) {
                           <label className="block text-xs font-medium text-gray-700 mb-1">Material Cost ($)</label>
                           <input type="number" step="0.01" min="0" className="input w-full text-sm" placeholder="0.00"
                             value={line.cost_material} onChange={e => updateLine(i, 'cost_material', e.target.value)} />
+                          {(() => {
+                            const sku = skus.find(s => String(s.id) === String(line.bulk_sku_id))
+                            if (!sku?.cost_price) return null
+                            return <p className="text-xs text-green-600 mt-0.5">💡 ${sku.cost_price}/kg standard</p>
+                          })()}
                         </div>
                         <div>
                           <label className="block text-xs font-medium text-gray-700 mb-1">Packaging ($)</label>
@@ -3109,7 +3186,8 @@ export default function Repacking() {
   const [bomCount, setBomCount]         = useState(0)
   const [purchaseCount, setPurchaseCount] = useState(0)
   const [runCount, setRunCount]         = useState(0)
-  const [runPreFill, setRunPreFill]     = useState(null)  // { landed_cost_id, bulk_sku_id, batchRef, bulkSkuName }
+  const [runPreFill, setRunPreFill]         = useState(null)  // { landed_cost_id, bulk_sku_id, batchRef, bulkSkuName }
+  const [stockPreFillSkuId, setStockPreFillSkuId] = useState(null)  // pre-select bulk SKU in Stock Received
 
   // Load everything on mount — SKUs unblock the page first, counts update in background
   useEffect(() => {
@@ -3274,8 +3352,8 @@ export default function Repacking() {
         <div className="flex justify-center py-16"><Loader2 className="animate-spin text-blue-500" size={28} /></div>
       ) : (
         <>
-          {activeTab === 0 && <BOMTab skus={skus} refreshSkus={refreshSkus} />}
-          {activeTab === 1 && <PurchasesTab skus={skus} onStartPacking={handleStartPacking} />}
+          {activeTab === 0 && <BOMTab skus={skus} refreshSkus={refreshSkus} onGoToStock={skuId => { setStockPreFillSkuId(skuId); handleTabChange(1) }} />}
+          {activeTab === 1 && <PurchasesTab skus={skus} onStartPacking={handleStartPacking} preFillSkuId={stockPreFillSkuId} />}
           {activeTab === 2 && <RunsTab skus={skus} landedCosts={landedCosts} preFill={runPreFill} onPreFillConsumed={() => setRunPreFill(null)} />}
           {activeTab === 3 && <SummaryTab />}
         </>
