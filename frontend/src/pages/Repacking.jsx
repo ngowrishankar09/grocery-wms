@@ -832,6 +832,7 @@ function PurchasesTab({ skus, onStartPacking }) {
   const [saving, setSaving]         = useState(false)
   const [formError, setFormError]   = useState(null)
   const [deleting, setDeleting]     = useState(null)
+  const [bomInputIds, setBomInputIds] = useState([])  // input_sku_ids from BOM — catches non-flagged bulk SKUs
 
   const emptyCostLine = () => ({ description: '', amount: '', currency: 'USD', fx_rate_to_usd: '1', sort_order: 0 })
   const emptyLine = () => ({ bulk_sku_id: '', qty_kg: '', qty_uom: 'kg', bag_weight_kg: '', cost_material: '', cost_packaging_mat: '', cost_labor: '' })
@@ -889,7 +890,16 @@ function PurchasesTab({ skus, onStartPacking }) {
     } finally { setLoading(false) }
   }, [])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    load()
+    // Load BOM to find any SKUs used as raw material that aren't flagged is_bulk_material yet
+    repackingAPI.listBOM()
+      .then(res => {
+        const ids = [...new Set((Array.isArray(res.data) ? res.data : []).map(b => b.input_sku_id))]
+        setBomInputIds(ids)
+      })
+      .catch(() => {})
+  }, [load])
 
   // Live cost-per-kg preview for one line
   const calcLinePreview = (lineIdx) => {
@@ -1033,8 +1043,8 @@ function PurchasesTab({ skus, onStartPacking }) {
     (parseFloat(form.shared_overhead) || 0) +
     (parseFloat(form.shared_other)    || 0)
 
-  // Only show bulk/raw material SKUs in the raw-material picker
-  const bulkSkus = skus.filter(s => s.is_bulk_material)
+  // Show any SKU that is flagged as bulk OR referenced as a raw material in any BOM
+  const bulkSkus = skus.filter(s => s.is_bulk_material || bomInputIds.includes(s.id))
 
   return (
     <div>
@@ -1185,24 +1195,43 @@ function PurchasesTab({ skus, onStartPacking }) {
                           </button>
                         )}
                       </div>
-                      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-2">
-                        <div className="md:col-span-2">
-                          <label className="block text-xs font-medium text-gray-700 mb-1">Raw material <span className="text-red-500">*</span></label>
-                          {bulkSkus.length === 0 ? (
-                            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 flex items-start gap-2">
-                              <AlertTriangle size={13} className="mt-0.5 flex-shrink-0" />
-                              <span>No bulk materials found. Go to <strong>SKU Master</strong> → edit a SKU → tick <em>"This is a raw / bulk material"</em>.</span>
-                            </div>
-                          ) : (
-                            <SKUSearch
-                              skus={bulkSkus}
-                              value={line.bulk_sku_id}
-                              onChange={val => updateLine(i, 'bulk_sku_id', val)}
-                              placeholder="Search bulk material…"
-                              required
-                            />
-                          )}
-                        </div>
+                      {/* Raw material — quick-select cards from Step 1 setup */}
+                      <div className="mb-3">
+                        <label className="block text-xs font-medium text-gray-700 mb-2">
+                          Which raw material arrived? <span className="text-red-500">*</span>
+                        </label>
+                        {bulkSkus.length === 0 ? (
+                          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 flex items-start gap-2">
+                            <AlertTriangle size={13} className="mt-0.5 flex-shrink-0" />
+                            <span>No bulk materials set up yet. Go to <strong>My Products</strong> (Step 1) and add your bulk materials first.</span>
+                          </div>
+                        ) : (
+                          <div className="flex flex-wrap gap-2">
+                            {bulkSkus.map(sku => {
+                              const isSelected = String(line.bulk_sku_id) === String(sku.id)
+                              return (
+                                <button
+                                  key={sku.id}
+                                  type="button"
+                                  onClick={() => updateLine(i, 'bulk_sku_id', String(sku.id))}
+                                  className={`flex items-center gap-2 px-3 py-2 rounded-xl border-2 text-sm font-medium transition-all ${
+                                    isSelected
+                                      ? 'border-blue-500 bg-blue-50 text-blue-800 shadow-sm'
+                                      : 'border-gray-200 bg-white text-gray-700 hover:border-blue-300 hover:bg-blue-50'
+                                  }`}
+                                >
+                                  <span className="text-base">📦</span>
+                                  <span className="font-semibold">{sku.product_name}</span>
+                                  <span className="text-xs text-gray-400 font-normal">{sku.sku_code}</span>
+                                  {isSelected && <CheckCircle2 size={14} className="text-blue-500 ml-1" />}
+                                </button>
+                              )
+                            })}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                         <div>
                           <label className="block text-xs font-medium text-gray-700 mb-1">
                             Quantity received <span className="text-red-500">*</span>

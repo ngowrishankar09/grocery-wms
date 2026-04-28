@@ -453,6 +453,12 @@ def create_bom(
         notes             = body.notes,
     )
     db.add(bom)
+
+    # Auto-flag the input SKU as a bulk material so it surfaces in Stock Received
+    input_sku = db.query(SKU).filter(SKU.id == body.input_sku_id, SKU.company_id == company_id).first()
+    if input_sku and not input_sku.is_bulk_material:
+        input_sku.is_bulk_material = True
+
     db.commit()
     db.refresh(bom)
     return {
@@ -492,6 +498,12 @@ def update_bom(
     bom.unit              = body.unit
     bom.waste_pct_allowed = body.waste_pct_allowed
     bom.notes             = body.notes
+
+    # Auto-flag the input SKU as a bulk material so it surfaces in Stock Received
+    input_sku = db.query(SKU).filter(SKU.id == body.input_sku_id, SKU.company_id == company_id).first()
+    if input_sku and not input_sku.is_bulk_material:
+        input_sku.is_bulk_material = True
+
     db.commit()
     db.refresh(bom)
     return {
