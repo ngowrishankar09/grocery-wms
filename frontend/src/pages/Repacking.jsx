@@ -295,6 +295,7 @@ function BOMTab({ skus, refreshSkus, onGoToStock }) {
   const [customBulkWeightUom, setCustomBulkWeightUom] = useState('kg')
   const [customBulkCostPerKg, setCustomBulkCostPerKg] = useState('')
   const [bulkCostInput, setBulkCostInput]             = useState('')  // cost/kg for existing bulk SKU
+  const [creatingNewBulk, setCreatingNewBulk]         = useState(false) // "add a new bulk material" mode when hasBulkFlag
 
   // ── Form state ───────────────────────────────────────────────
   // input_sku_id: the one bulk material selected for this form session
@@ -375,7 +376,7 @@ function BOMTab({ skus, refreshSkus, onGoToStock }) {
   const resetForm = () => {
     setForm(emptyForm)
     setCustomBulkName(''); setCustomBulkWeight(''); setCustomBulkWeightUom('kg'); setCustomBulkCostPerKg('')
-    setBulkCostInput('')
+    setBulkCostInput(''); setCreatingNewBulk(false)
     setFormError(null)
   }
 
@@ -411,7 +412,7 @@ function BOMTab({ skus, refreshSkus, onGoToStock }) {
 
     // ── Step 1: resolve bulk SKU ID ──────────────────────────
     let resolvedInputSkuId = form.input_sku_id
-    if (!hasBulkFlag) {
+    if (!hasBulkFlag || creatingNewBulk) {
       const name = customBulkName.trim()
       if (!name) { setFormError('Please enter the name of the raw material.'); return }
       setSaving(true)
@@ -435,7 +436,7 @@ function BOMTab({ skus, refreshSkus, onGoToStock }) {
     if (!resolvedInputSkuId) { setFormError('Please select a bulk material.'); setSaving(false); return }
 
     // If user entered a cost/kg for an existing bulk SKU, save it now
-    if (hasBulkFlag && bulkCostInput) {
+    if (hasBulkFlag && !creatingNewBulk && bulkCostInput) {
       try { await skuAPI.update(parseInt(resolvedInputSkuId), { cost_price: parseFloat(bulkCostInput) }) }
       catch {}  // best-effort — don't block BOM save
     }
@@ -533,61 +534,79 @@ function BOMTab({ skus, refreshSkus, onGoToStock }) {
             {/* ── STEP 1: Pick the bulk material ── */}
             <div className="bg-gray-50 border border-gray-200 rounded-xl p-3 space-y-2">
               <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Step 1 — Raw material you buy in bulk</p>
-              {!hasBulkFlag ? (
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  <div>
-                    <label className="block text-xs text-gray-600 mb-1">Material name <span className="text-red-500">*</span></label>
-                    <input type="text" className="input w-full" placeholder="e.g. Chilli Powder"
-                      value={customBulkName} onChange={e => setCustomBulkName(e.target.value)} required />
-                    <p className="text-xs text-gray-400 mt-1">Will be saved to SKU Master automatically.</p>
-                  </div>
-                  <div>
-                    <label className="block text-xs text-gray-600 mb-1">Bag / sack weight</label>
-                    <div className="flex gap-2">
-                      <input type="number" step="0.01" min="0.01" className="input flex-1" placeholder="e.g. 25"
-                        value={customBulkWeight} onChange={e => setCustomBulkWeight(e.target.value)} />
-                      <select className="input w-20" value={customBulkWeightUom} onChange={e => setCustomBulkWeightUom(e.target.value)}>
-                        <option value="kg">kg</option>
-                        <option value="g">g</option>
-                        <option value="lbs">lbs</option>
-                        <option value="oz">oz</option>
-                      </select>
+              {(!hasBulkFlag || creatingNewBulk) ? (
+                /* ── Create a brand-new bulk material ── */
+                <div className="space-y-2">
+                  {creatingNewBulk && (
+                    <button type="button" onClick={() => { setCreatingNewBulk(false); setCustomBulkName(''); setCustomBulkWeight(''); setCustomBulkCostPerKg('') }}
+                      className="text-xs text-blue-500 hover:underline flex items-center gap-1">
+                      ← Back to existing materials
+                    </button>
+                  )}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-xs text-gray-600 mb-1">Material name <span className="text-red-500">*</span></label>
+                      <input type="text" className="input w-full" placeholder="e.g. Turmeric Powder"
+                        value={customBulkName} onChange={e => setCustomBulkName(e.target.value)} required />
+                      <p className="text-xs text-gray-400 mt-1">Will be saved to SKU Master automatically.</p>
                     </div>
-                  </div>
-                  <div>
-                    <label className="block text-xs text-gray-600 mb-1">Cost per kg ($) <span className="text-gray-400 font-normal">optional</span></label>
-                    <input type="number" step="0.01" min="0" className="input w-full" placeholder="e.g. 2.50"
-                      value={customBulkCostPerKg} onChange={e => setCustomBulkCostPerKg(e.target.value)} />
-                    <p className="text-xs text-gray-400 mt-1">Pre-fills Material Cost in Stock Received.</p>
+                    <div>
+                      <label className="block text-xs text-gray-600 mb-1">Bag / sack weight</label>
+                      <div className="flex gap-2">
+                        <input type="number" step="0.01" min="0.01" className="input flex-1" placeholder="e.g. 25"
+                          value={customBulkWeight} onChange={e => setCustomBulkWeight(e.target.value)} />
+                        <select className="input w-20" value={customBulkWeightUom} onChange={e => setCustomBulkWeightUom(e.target.value)}>
+                          <option value="kg">kg</option>
+                          <option value="g">g</option>
+                          <option value="lbs">lbs</option>
+                          <option value="oz">oz</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-600 mb-1">Cost per kg ($) <span className="text-gray-400 font-normal">optional</span></label>
+                      <input type="number" step="0.01" min="0" className="input w-full" placeholder="e.g. 2.50"
+                        value={customBulkCostPerKg} onChange={e => setCustomBulkCostPerKg(e.target.value)} />
+                      <p className="text-xs text-gray-400 mt-1">Pre-fills Material Cost in Stock Received.</p>
+                    </div>
                   </div>
                 </div>
               ) : (
-                <div className="flex flex-wrap gap-3 items-end">
-                  <div className="flex-1 min-w-[200px]">
-                    <label className="block text-xs text-gray-600 mb-1">Select bulk material <span className="text-red-500">*</span></label>
-                    <select className="input w-full"
-                      value={form.input_sku_id}
-                      onChange={e => { setForm(f => ({ ...f, input_sku_id: e.target.value, rows: [emptyRow()] })); setBulkCostInput('') }}
-                      required disabled={!!editBomId}
-                    >
-                      <option value="">Select…</option>
-                      {bulkSkuList.map(s => <option key={s.id} value={s.id}>{s.product_name} ({s.sku_code})</option>)}
-                    </select>
+                /* ── Select from existing bulk materials ── */
+                <div className="space-y-2">
+                  <div className="flex flex-wrap gap-3 items-end">
+                    <div className="flex-1 min-w-[200px]">
+                      <label className="block text-xs text-gray-600 mb-1">Select bulk material <span className="text-red-500">*</span></label>
+                      <select className="input w-full"
+                        value={form.input_sku_id}
+                        onChange={e => { setForm(f => ({ ...f, input_sku_id: e.target.value, rows: [emptyRow()] })); setBulkCostInput('') }}
+                        required disabled={!!editBomId}
+                      >
+                        <option value="">Select…</option>
+                        {bulkSkuList.map(s => <option key={s.id} value={s.id}>{s.product_name} ({s.sku_code})</option>)}
+                      </select>
+                    </div>
+                    {form.input_sku_id && (() => {
+                      const selSku = skus.find(s => String(s.id) === String(form.input_sku_id))
+                      return (
+                        <div className="w-40">
+                          <label className="block text-xs text-gray-600 mb-1">
+                            Cost per kg ($)
+                            {selSku?.cost_price ? <span className="text-green-600 ml-1">✓ ${selSku.cost_price}/kg</span> : <span className="text-gray-400 font-normal ml-1">optional</span>}
+                          </label>
+                          <input type="number" step="0.01" min="0" className="input w-full"
+                            placeholder={selSku?.cost_price ? String(selSku.cost_price) : 'e.g. 2.50'}
+                            value={bulkCostInput} onChange={e => setBulkCostInput(e.target.value)} />
+                        </div>
+                      )
+                    })()}
                   </div>
-                  {form.input_sku_id && (() => {
-                    const selSku = skus.find(s => String(s.id) === String(form.input_sku_id))
-                    return (
-                      <div className="w-40">
-                        <label className="block text-xs text-gray-600 mb-1">
-                          Cost per kg ($)
-                          {selSku?.cost_price ? <span className="text-green-600 ml-1">✓ ${selSku.cost_price}/kg saved</span> : <span className="text-gray-400 font-normal ml-1">optional</span>}
-                        </label>
-                        <input type="number" step="0.01" min="0" className="input w-full"
-                          placeholder={selSku?.cost_price ? String(selSku.cost_price) : 'e.g. 2.50'}
-                          value={bulkCostInput} onChange={e => setBulkCostInput(e.target.value)} />
-                      </div>
-                    )
-                  })()}
+                  {!editBomId && (
+                    <button type="button" onClick={() => { setCreatingNewBulk(true); setForm(f => ({ ...f, input_sku_id: '', rows: [emptyRow()] })) }}
+                      className="text-xs text-blue-600 hover:text-blue-800 hover:underline flex items-center gap-1">
+                      <Plus size={11} /> Add a different bulk material
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -606,6 +625,30 @@ function BOMTab({ skus, refreshSkus, onGoToStock }) {
                 )}
               </div>
 
+              {/* Already-linked retail products for the selected bulk — shown in add mode */}
+              {!editBomId && form.input_sku_id && (() => {
+                const existingGroup = grouped.find(g => String(g.bulk_id) === String(form.input_sku_id))
+                if (!existingGroup || existingGroup.outputs.length === 0) return null
+                return (
+                  <div className="bg-green-50 border border-green-200 rounded-xl px-3 py-2 mb-1">
+                    <p className="text-xs font-semibold text-green-700 mb-1.5">✓ Already set up ({existingGroup.outputs.length})</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {existingGroup.outputs.map(o => {
+                        const sku = skus.find(s => s.id === o.output_sku_id)
+                        return (
+                          <span key={o.id} className="inline-flex items-center gap-1 text-xs bg-white border border-green-200 text-green-800 px-2 py-1 rounded-lg">
+                            <CheckCircle2 size={10} className="text-green-500" />
+                            {o.output_sku_name}
+                            {sku?.case_size && sku?.unit_weight ? <span className="text-green-500 ml-0.5">{sku.case_size}×{sku.unit_weight}{sku.unit_weight_uom||'g'}</span> : null}
+                          </span>
+                        )
+                      })}
+                    </div>
+                    <p className="text-xs text-green-600 mt-1.5">Add more sizes below ↓</p>
+                  </div>
+                )
+              })()}
+
               {/* Column headers — desktop only */}
               <div className="hidden md:grid grid-cols-12 gap-2 text-xs font-medium text-gray-400 px-1">
                 <div className="col-span-5">Retail product</div>
@@ -615,7 +658,7 @@ function BOMTab({ skus, refreshSkus, onGoToStock }) {
               </div>
 
               {form.rows.map((row, idx) => {
-                const isDisabled = hasBulkFlag ? !form.input_sku_id : !customBulkName.trim()
+                const isDisabled = (hasBulkFlag && !creatingNewBulk) ? !form.input_sku_id : !customBulkName.trim()
                 // Retail SKUs available for this row: exclude other rows' selections + already saved
                 const usedInOtherRows = form.rows.filter((_, i) => i !== idx).map(r => r.output_sku_id).filter(Boolean).map(Number)
                 const rowRetailList = bomRetailBase.filter(s =>
