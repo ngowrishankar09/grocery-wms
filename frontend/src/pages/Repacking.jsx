@@ -1350,23 +1350,49 @@ function PurchasesTab({ skus, onStartPacking, preFillSkuId }) {
                             })}
                           </div>
                         )}
-                        {/* Show retail packs that will be produced from the selected bulk material */}
-                        {line.bulk_sku_id && (bomsByInput[line.bulk_sku_id] || []).length > 0 && (
-                          <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                            <span className="text-xs text-gray-400">Will pack into:</span>
-                            {(bomsByInput[line.bulk_sku_id] || []).map(b => {
-                              const retailSku = skus.find(s => s.id === b.output_sku_id)
-                              return (
-                                <span key={b.id} className="inline-flex items-center gap-1 text-xs bg-indigo-50 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded-lg">
-                                  {b.output_sku_name}
-                                  {retailSku?.case_size && retailSku?.unit_weight
-                                    ? <span className="text-indigo-400">{retailSku.case_size}×{retailSku.unit_weight}{retailSku.unit_weight_uom||'g'}</span>
-                                    : null}
-                                </span>
-                              )
-                            })}
-                          </div>
-                        )}
+                        {/* Retail-pack production estimate — live-updates as qty is typed */}
+                        {line.bulk_sku_id && (bomsByInput[line.bulk_sku_id] || []).length > 0 && (() => {
+                          const receivedKg = resolveKg(line)
+                          const linkedBOMs = bomsByInput[line.bulk_sku_id] || []
+                          return (
+                            <div className="mt-2 rounded-xl bg-indigo-50 border border-indigo-200 px-3 py-2">
+                              <p className="text-xs font-semibold text-indigo-600 mb-1.5">
+                                {receivedKg > 0 ? '📦 Estimated production from this delivery:' : '📦 Will pack into:'}
+                              </p>
+                              <div className="flex flex-wrap gap-2">
+                                {linkedBOMs.map(b => {
+                                  const retailSku   = skus.find(s => s.id === b.output_sku_id)
+                                  const qtyPerCase  = parseFloat(b.qty_per_unit) || 0  // kg per case
+                                  const estCases    = receivedKg > 0 && qtyPerCase > 0
+                                    ? Math.floor(receivedKg / qtyPerCase)
+                                    : null
+                                  return (
+                                    <div key={b.id} className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border font-medium ${
+                                      estCases != null
+                                        ? 'bg-white border-indigo-300 text-indigo-800'
+                                        : 'bg-white border-indigo-200 text-indigo-600'
+                                    }`}>
+                                      <span>{b.output_sku_name}</span>
+                                      {retailSku?.case_size && retailSku?.unit_weight && (
+                                        <span className="text-indigo-400 font-normal">
+                                          {retailSku.case_size}×{retailSku.unit_weight}{retailSku.unit_weight_uom||'g'}
+                                        </span>
+                                      )}
+                                      {estCases != null && (
+                                        <span className="bg-indigo-600 text-white px-1.5 py-0.5 rounded-md text-xs font-bold ml-0.5">
+                                          ~{estCases} cases
+                                        </span>
+                                      )}
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                              {receivedKg > 0 && (
+                                <p className="text-xs text-indigo-400 mt-1.5">Based on BOM quantities · enter actual output in Packing Sessions</p>
+                              )}
+                            </div>
+                          )
+                        })()}
                       </div>
 
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
