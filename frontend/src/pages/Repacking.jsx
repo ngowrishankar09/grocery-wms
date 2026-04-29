@@ -924,7 +924,7 @@ function PurchasesTab({ skus, onStartPacking, preFillSkuId }) {
   const [bomsByInput, setBomsByInput]   = useState({})            // { input_sku_id: [bom,...] } for retail-pack hints
 
   const emptyCostLine = () => ({ description: '', amount: '', currency: 'USD', fx_rate_to_usd: '1', sort_order: 0 })
-  const emptyLine = () => ({ bulk_sku_id: '', qty_kg: '', qty_uom: 'kg', bag_weight_kg: '', cost_material: '', cost_packaging_mat: '', cost_labor: '' })
+  const emptyLine = () => ({ bulk_sku_id: '', qty_kg: '', qty_uom: 'kg', bag_weight_kg: '', sku_cases: {}, cost_material: '', cost_packaging_mat: '', cost_labor: '' })
 
   // Convert any unit to kg for calculations / saving
   const resolveKg = (line) => {
@@ -1049,6 +1049,27 @@ function PurchasesTab({ skus, onStartPacking, preFillSkuId }) {
       }
     }
 
+    return { ...f, lines }
+  })
+
+  // Update case count for a specific retail SKU within a delivery line,
+  // and auto-recalculate total bulk kg from all case entries
+  const updateSkuCases = (lineIdx, skuId, cases) => setForm(f => {
+    const lines = [...f.lines]
+    const line  = lines[lineIdx]
+    const newSkuCases = { ...line.sku_cases, [String(skuId)]: cases }
+    // Sum up: total kg = Σ (cases × qty_per_unit from BOM)
+    const linkedBOMs = bomsByInput[String(line.bulk_sku_id)] || []
+    const totalKg = linkedBOMs.reduce((sum, b) => {
+      const c = parseFloat(newSkuCases[String(b.output_sku_id)] || 0)
+      return sum + c * (parseFloat(b.qty_per_unit) || 0)
+    }, 0)
+    // Auto-fill cost_material from cost_price if not yet entered
+    const bulkSku = skus.find(s => String(s.id) === String(line.bulk_sku_id))
+    const newCost = (!parseFloat(line.cost_material) && bulkSku?.cost_price && totalKg > 0)
+      ? (totalKg * bulkSku.cost_price).toFixed(2)
+      : line.cost_material
+    lines[lineIdx] = { ...line, sku_cases: newSkuCases, qty_kg: totalKg > 0 ? totalKg.toFixed(3) : line.qty_kg, cost_material: newCost }
     return { ...f, lines }
   })
 
@@ -1350,59 +1371,67 @@ function PurchasesTab({ skus, onStartPacking, preFillSkuId }) {
                             })}
                           </div>
                         )}
-                        {/* Retail-pack production estimate — live-updates as qty is typed */}
+                        {/* ── Per-SKU case-count inputs → auto-calculates bulk kg ── */}
                         {line.bulk_sku_id && (bomsByInput[line.bulk_sku_id] || []).length > 0 && (() => {
-                          const receivedKg = resolveKg(line)
                           const linkedBOMs = bomsByInput[line.bulk_sku_id] || []
+                          const totalKg = linkedBOMs.reduce((sum, b) => {
+                            const c = parseFloat(line.sku_cases?.[String(b.output_sku_id)] || 0)
+                            return sum + c * (parseFloat(b.qty_per_unit) || 0)
+                          }, 0)
                           return (
-                            <div className="mt-2 rounded-xl bg-indigo-50 border border-indigo-200 px-3 py-2">
-                              <p className="text-xs font-semibold text-indigo-600 mb-1.5">
-                                {receivedKg > 0 ? '📦 Estimated production from this delivery:' : '📦 Will pack into:'}
+                            <div className="mt-2 rounded-xl bg-indigo-50 border border-indigo-200 p-3">
+                              <p className="text-xs font-semibold text-indigo-700 mb-2">
+                                Cases received per product
+                                <span className="font-normal text-indigo-400 ml-1">— bulk total calculates automatically</span>
                               </p>
-                              <div className="flex flex-wrap gap-2">
+                              <div className="space-y-1.5">
                                 {linkedBOMs.map(b => {
-                                  const retailSku   = skus.find(s => s.id === b.output_sku_id)
-                                  const qtyPerCase  = parseFloat(b.qty_per_unit) || 0  // kg per case
-                                  const estCases    = receivedKg > 0 && qtyPerCase > 0
-                                    ? Math.floor(receivedKg / qtyPerCase)
-                                    : null
+                                  const retailSku = skus.find(s => s.id === b.output_sku_id)
+                                  const cases     = line.sku_cases?.[String(b.output_sku_id)] || ''
+                                  const kgEquiv   = parseFloat(cases || 0) * (parseFloat(b.qty_per_unit) || 0)
                                   return (
-                                    <div key={b.id} className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border font-medium ${
-                                      estCases != null
-                                        ? 'bg-white border-indigo-300 text-indigo-800'
-                                        : 'bg-white border-indigo-200 text-indigo-600'
-                                    }`}>
-                                      <span>{b.output_sku_name}</span>
-                                      {retailSku?.case_size && retailSku?.unit_weight && (
-                                        <span className="text-indigo-400 font-normal">
-                                          {retailSku.case_size}×{retailSku.unit_weight}{retailSku.unit_weight_uom||'g'}
+                                    <div key={b.id} className="flex items-center gap-2">
+                                      <div className="flex-1 min-w-0">
+                                        <span className="text-xs font-medium text-indigo-800 truncate block">{b.output_sku_name}</span>
+                                        <span className="text-xs text-indigo-400">{b.qty_per_unit} {b.unit}/case
+                                          {retailSku?.case_size && retailSku?.unit_weight ? ` · ${retailSku.case_size}×${retailSku.unit_weight}${retailSku.unit_weight_uom||'g'}` : ''}
                                         </span>
-                                      )}
-                                      {estCases != null && (
-                                        <span className="bg-indigo-600 text-white px-1.5 py-0.5 rounded-md text-xs font-bold ml-0.5">
-                                          ~{estCases} cases
-                                        </span>
-                                      )}
+                                      </div>
+                                      <div className="flex items-center gap-1.5 shrink-0">
+                                        <input
+                                          type="number" min="0" step="1"
+                                          className="input w-24 text-sm text-right"
+                                          placeholder="0 cases"
+                                          value={cases}
+                                          onChange={e => updateSkuCases(i, b.output_sku_id, e.target.value)}
+                                        />
+                                        {kgEquiv > 0 && (
+                                          <span className="text-xs text-indigo-500 w-20 text-right shrink-0">= {kgEquiv.toFixed(1)} kg</span>
+                                        )}
+                                      </div>
                                     </div>
                                   )
                                 })}
                               </div>
-                              {receivedKg > 0 && (
-                                <p className="text-xs text-indigo-400 mt-1.5">Based on BOM quantities · enter actual output in Packing Sessions</p>
+                              {totalKg > 0 && (
+                                <div className="mt-2 pt-2 border-t border-indigo-200 flex items-center justify-between">
+                                  <span className="text-xs text-indigo-500">Total bulk used</span>
+                                  <span className="text-sm font-bold text-indigo-700">{totalKg.toFixed(2)} kg</span>
+                                </div>
                               )}
                             </div>
                           )
                         })()}
                       </div>
 
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-2">
                         <div>
                           <label className="block text-xs font-medium text-gray-700 mb-1">
-                            Quantity received <span className="text-red-500">*</span>
+                            {(bomsByInput[line.bulk_sku_id] || []).length > 0 ? 'Total bulk received (kg)' : 'Quantity received'} <span className="text-red-500">*</span>
                           </label>
                           <div className="flex gap-1.5">
                             <input type="number" step="0.001" min="0.001" className="input flex-1 text-sm"
-                              placeholder={line.qty_uom === 'bags' ? 'no. of bags' : 'e.g. 1000'}
+                              placeholder={line.qty_uom === 'bags' ? 'no. of bags' : 'auto-filled from cases above'}
                               value={line.qty_kg} onChange={e => updateLine(i, 'qty_kg', e.target.value)} required />
                             <select className="input w-20 text-sm" value={line.qty_uom}
                               onChange={e => {
