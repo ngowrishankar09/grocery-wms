@@ -295,6 +295,8 @@ function BOMTab({ skus, refreshSkus, onGoToStock }) {
   const [customBulkWeightUom, setCustomBulkWeightUom] = useState('kg')
   const [customBulkCostPerKg, setCustomBulkCostPerKg] = useState('')
   const [bulkCostInput, setBulkCostInput]             = useState('')  // cost/kg for existing bulk SKU
+  const [bulkWeightInput, setBulkWeightInput]         = useState('')  // bag weight for existing bulk SKU
+  const [bulkWeightUomInput, setBulkWeightUomInput]   = useState('kg')
   const [creatingNewBulk, setCreatingNewBulk]         = useState(false) // "add a new bulk material" mode when hasBulkFlag
 
   // ── Form state ───────────────────────────────────────────────
@@ -376,7 +378,7 @@ function BOMTab({ skus, refreshSkus, onGoToStock }) {
   const resetForm = () => {
     setForm(emptyForm)
     setCustomBulkName(''); setCustomBulkWeight(''); setCustomBulkWeightUom('kg'); setCustomBulkCostPerKg('')
-    setBulkCostInput(''); setCreatingNewBulk(false)
+    setBulkCostInput(''); setBulkWeightInput(''); setBulkWeightUomInput('kg'); setCreatingNewBulk(false)
     setFormError(null)
   }
 
@@ -384,7 +386,7 @@ function BOMTab({ skus, refreshSkus, onGoToStock }) {
     setEditBomId(null)
     setForm({ input_sku_id: prefillBulkId ? String(prefillBulkId) : '', rows: [emptyRow()] })
     setCustomBulkName(''); setCustomBulkWeight(''); setCustomBulkWeightUom('kg'); setCustomBulkCostPerKg('')
-    setBulkCostInput(''); setCreatingNewBulk(false)
+    setBulkCostInput(''); setBulkWeightInput(''); setBulkWeightUomInput('kg'); setCreatingNewBulk(false)
     setFormError(null); setShowForm(true)
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
@@ -404,7 +406,7 @@ function BOMTab({ skus, refreshSkus, onGoToStock }) {
       }],
     })
     setCustomBulkName(''); setCustomBulkWeight(''); setCustomBulkWeightUom('kg'); setCustomBulkCostPerKg('')
-    setBulkCostInput(''); setCreatingNewBulk(false)
+    setBulkCostInput(''); setBulkWeightInput(''); setBulkWeightUomInput('kg'); setCreatingNewBulk(false)
     setFormError(null); setShowForm(true)
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
@@ -437,9 +439,12 @@ function BOMTab({ skus, refreshSkus, onGoToStock }) {
     }
     if (!resolvedInputSkuId) { setFormError('Please select a bulk material.'); setSaving(false); return }
 
-    // If user entered a cost/kg for an existing bulk SKU, save it now
-    if (hasBulkFlag && !creatingNewBulk && bulkCostInput) {
-      try { await skuAPI.update(parseInt(resolvedInputSkuId), { cost_price: parseFloat(bulkCostInput) }) }
+    // If user entered a cost/kg or bag size for an existing bulk SKU, save it now
+    if (hasBulkFlag && !creatingNewBulk && (bulkCostInput || bulkWeightInput)) {
+      const patch = {}
+      if (bulkCostInput)   patch.cost_price       = parseFloat(bulkCostInput)
+      if (bulkWeightInput) { patch.unit_weight     = parseFloat(bulkWeightInput); patch.unit_weight_uom = bulkWeightUomInput || 'kg' }
+      try { await skuAPI.update(parseInt(resolvedInputSkuId), patch) }
       catch {}  // best-effort — don't block BOM save
     }
 
@@ -581,7 +586,7 @@ function BOMTab({ skus, refreshSkus, onGoToStock }) {
                       <label className="block text-xs text-gray-600 mb-1">Select bulk material <span className="text-red-500">*</span></label>
                       <select className="input w-full"
                         value={form.input_sku_id}
-                        onChange={e => { setForm(f => ({ ...f, input_sku_id: e.target.value, rows: [emptyRow()] })); setBulkCostInput('') }}
+                        onChange={e => { setForm(f => ({ ...f, input_sku_id: e.target.value, rows: [emptyRow()] })); setBulkCostInput(''); setBulkWeightInput(''); setBulkWeightUomInput('kg') }}
                         required disabled={!!editBomId}
                       >
                         <option value="">Select…</option>
@@ -591,15 +596,34 @@ function BOMTab({ skus, refreshSkus, onGoToStock }) {
                     {form.input_sku_id && (() => {
                       const selSku = skus.find(s => String(s.id) === String(form.input_sku_id))
                       return (
-                        <div className="w-40">
-                          <label className="block text-xs text-gray-600 mb-1">
-                            Cost per kg ($)
-                            {selSku?.cost_price ? <span className="text-green-600 ml-1">✓ ${selSku.cost_price}/kg</span> : <span className="text-gray-400 font-normal ml-1">optional</span>}
-                          </label>
-                          <input type="number" step="0.01" min="0" className="input w-full"
-                            placeholder={selSku?.cost_price ? String(selSku.cost_price) : 'e.g. 2.50'}
-                            value={bulkCostInput} onChange={e => setBulkCostInput(e.target.value)} />
-                        </div>
+                        <>
+                          <div className="w-40">
+                            <label className="block text-xs text-gray-600 mb-1">
+                              Bag / sack size
+                              {selSku?.unit_weight ? <span className="text-green-600 ml-1">✓ {selSku.unit_weight}{selSku.unit_weight_uom||'kg'}</span> : <span className="text-gray-400 font-normal ml-1">optional</span>}
+                            </label>
+                            <div className="flex gap-1.5">
+                              <input type="number" step="0.01" min="0.01" className="input flex-1 text-sm"
+                                placeholder={selSku?.unit_weight ? String(selSku.unit_weight) : 'e.g. 25'}
+                                value={bulkWeightInput} onChange={e => setBulkWeightInput(e.target.value)} />
+                              <select className="input w-16 text-sm" value={bulkWeightUomInput} onChange={e => setBulkWeightUomInput(e.target.value)}>
+                                <option value="kg">kg</option>
+                                <option value="g">g</option>
+                                <option value="lbs">lbs</option>
+                                <option value="oz">oz</option>
+                              </select>
+                            </div>
+                          </div>
+                          <div className="w-40">
+                            <label className="block text-xs text-gray-600 mb-1">
+                              Cost per kg ($)
+                              {selSku?.cost_price ? <span className="text-green-600 ml-1">✓ ${selSku.cost_price}/kg</span> : <span className="text-gray-400 font-normal ml-1">optional</span>}
+                            </label>
+                            <input type="number" step="0.01" min="0" className="input w-full"
+                              placeholder={selSku?.cost_price ? String(selSku.cost_price) : 'e.g. 2.50'}
+                              value={bulkCostInput} onChange={e => setBulkCostInput(e.target.value)} />
+                          </div>
+                        </>
                       )
                     })()}
                   </div>
