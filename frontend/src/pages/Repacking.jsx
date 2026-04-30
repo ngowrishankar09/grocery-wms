@@ -586,7 +586,14 @@ function BOMTab({ skus, refreshSkus, onGoToStock }) {
                       <label className="block text-xs text-gray-600 mb-1">Select bulk material <span className="text-red-500">*</span></label>
                       <select className="input w-full"
                         value={form.input_sku_id}
-                        onChange={e => { setForm(f => ({ ...f, input_sku_id: e.target.value, rows: [emptyRow()] })); setBulkCostInput(''); setBulkWeightInput(''); setBulkWeightUomInput('kg') }}
+                        onChange={e => {
+                          const skuId = e.target.value
+                          const picked = skus.find(s => String(s.id) === String(skuId))
+                          setForm(f => ({ ...f, input_sku_id: skuId, rows: [emptyRow()] }))
+                          setBulkCostInput('')
+                          setBulkWeightInput('')
+                          setBulkWeightUomInput(picked?.unit_weight_uom || 'kg')
+                        }}
                         required disabled={!!editBomId}
                       >
                         <option value="">Select…</option>
