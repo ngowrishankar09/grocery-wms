@@ -9,7 +9,7 @@ from models import (
     create_tables, Warehouse, User, Company, CompanyProfile,
     WarehouseTask, SupplierASN, CreditNote, VendorBill, Quote, AuditLog,
     SKU, Vendor, Inventory, Batch, Customer,
-    ShipmentCostLine, RunCostLine,
+    ShipmentCostLine, RunCostLine, SkuBulkLink,
 )
 from routers import skus, vendors, receiving, orders, inventory, transfers, forecasting, dashboard, upload, settings, dispatch
 from routers import reports, stock_take, notifications, dispatch_board, spreadsheet, quickbooks, bin_locations, purchase_orders, labels, customers, returns, invoices
@@ -181,6 +181,10 @@ def _migrate():
         ("packing_run_outputs", "units_planned",  "INTEGER"),
         # Bulk/raw material flag — distinguishes raw inputs from retail SKUs
         ("skus", "is_bulk_material", "BOOLEAN DEFAULT FALSE"),
+        # Local-pack bulk depletion tracking: accumulated kg consumed from local packing
+        ("inventory", "bulk_kg_consumed", "FLOAT DEFAULT 0.0"),
+        # sku_bulk_links company_id (table auto-created; just ensure column exists)
+        ("sku_bulk_links", "company_id", "INTEGER"),
     ]
     # Use IF NOT EXISTS for PostgreSQL (idempotent); fall back to try/except for SQLite
     add_col = "ADD COLUMN IF NOT EXISTS" if is_postgres else "ADD COLUMN"

@@ -38,6 +38,8 @@ export const skuAPI = {
   get: (id) => api.get(`/skus/${id}`),
   categories: () => api.get('/skus/categories/list'),
   lookupBarcode: (barcode) => api.get(`/skus/barcode/${barcode}`),
+  getBulkLinks: (id) => api.get(`/skus/${id}/bulk-links`),
+  setBulkLinks: (id, links) => api.put(`/skus/${id}/bulk-links`, links),
 }
 
 export const vendorAPI = {

@@ -1046,6 +1046,20 @@ class BillOfMaterial(Base):
     notes              = Column(String, nullable=True)
     created_at         = Column(DateTime, default=datetime.utcnow)
 
+# ─── Bulk ↔ Retail SKU Links ──────────────────────────────────
+class SkuBulkLink(Base):
+    """Links a retail/finished SKU to its parent bulk/raw SKU.
+    local_pack_active=True  → dispatching the retail SKU auto-deducts kg from bulk stock.
+    local_pack_active=False → retail SKU appears in Repacking module for production-run tracking.
+    """
+    __tablename__ = "sku_bulk_links"
+    id                = Column(Integer, primary_key=True, index=True)
+    company_id        = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
+    bulk_sku_id       = Column(Integer, ForeignKey("skus.id"), nullable=False)
+    retail_sku_id     = Column(Integer, ForeignKey("skus.id"), nullable=False)
+    local_pack_active = Column(Boolean, default=False)
+    created_at        = Column(DateTime, default=datetime.utcnow)
+
 class PackingRun(Base):
     __tablename__ = "packing_runs"
     id             = Column(Integer, primary_key=True, index=True)

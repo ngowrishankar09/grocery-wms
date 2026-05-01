@@ -9,7 +9,7 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from database import get_db
 from models import (
     SKU, Batch, Inventory, MonthlyConsumption,
-    DispatchRecord, DispatchRecordItem
+    DispatchRecord, DispatchRecordItem, SkuBulkLink
 )
 from routers.receiving import update_inventory, update_monthly_consumption
 from security import get_current_user, get_company_id
@@ -28,6 +28,82 @@ class DispatchCreate(BaseModel):
     items: List[DispatchItemIn]
 
 # ─── Helpers ──────────────────────────────────────────────────
+def _weight_to_kg(weight, uom):
+    """Convert weight + uom to kg float. Returns None if weight is None."""
+    if not weight:
+        return None
+    uom = (uom or "g").lower()
+    if uom == "kg":  return float(weight)
+    if uom == "g":   return float(weight) / 1000
+    if uom == "lbs": return float(weight) * 0.453592
+    if uom == "oz":  return float(weight) * 0.0283495
+    return float(weight) / 1000  # fallback
+
+
+def deplete_bulk_for_local_pack(
+    retail_sku: "SKU",
+    cases_fulfilled: int,
+    company_id: int,
+    db: Session,
+):
+    """When a retail SKU with local_pack_active=True is dispatched,
+    deduct the equivalent kg from the linked bulk SKU's inventory.
+
+    Uses a float accumulator (bulk_kg_consumed) so fractional-sack consumption
+    is tracked precisely.  When the accumulator crosses a full sack's worth,
+    cases_on_hand is decremented by the appropriate integer count.
+    """
+    link = db.query(SkuBulkLink).filter(
+        SkuBulkLink.retail_sku_id   == retail_sku.id,
+        SkuBulkLink.local_pack_active == True,
+        SkuBulkLink.company_id      == company_id,
+    ).first()
+    if not link:
+        return
+
+    bulk_sku = db.query(SKU).filter(
+        SKU.id == link.bulk_sku_id,
+        SKU.company_id == company_id,
+    ).first()
+    if not bulk_sku:
+        return
+
+    # kg per individual retail unit (not per case)
+    unit_kg = _weight_to_kg(retail_sku.unit_weight, retail_sku.unit_weight_uom)
+    if not unit_kg:
+        return  # can't calculate without unit weight
+
+    total_units   = cases_fulfilled * (retail_sku.case_size or 1)
+    kg_to_consume = total_units * unit_kg
+
+    # kg per bulk sack/bag (used to convert kg → integer case deductions)
+    bulk_unit_kg = _weight_to_kg(bulk_sku.unit_weight, bulk_sku.unit_weight_uom)
+    if not bulk_unit_kg or bulk_unit_kg <= 0:
+        return
+
+    # Deduct from WH1 first, then WH2
+    for wh in ["WH1", "WH2"]:
+        if kg_to_consume <= 0:
+            break
+        inv = db.query(Inventory).filter(
+            Inventory.sku_id    == bulk_sku.id,
+            Inventory.warehouse == wh,
+            Inventory.company_id == company_id,
+        ).first()
+        if inv is None:
+            continue
+
+        inv.bulk_kg_consumed = (inv.bulk_kg_consumed or 0.0) + kg_to_consume
+        kg_to_consume = 0.0
+
+        # Convert accumulated kg into whole-sack deductions
+        full_sacks = int(inv.bulk_kg_consumed // bulk_unit_kg)
+        if full_sacks > 0:
+            actual_deduct       = min(full_sacks, max(0, inv.cases_on_hand))
+            inv.cases_on_hand   = max(0, inv.cases_on_hand - actual_deduct)
+            inv.bulk_kg_consumed -= full_sacks * bulk_unit_kg   # keep the remainder
+
+
 def generate_dispatch_ref(db: Session) -> str:
     count = db.query(DispatchRecord).count()
     return f"DSP-{datetime.utcnow().strftime('%Y%m%d')}-{count + 1:04d}"
@@ -139,6 +215,10 @@ def create_dispatch(
         })
         if unfulfilled > 0:
             warnings.append(f"{sku.product_name}: only {fulfilled}/{item.cases} cases available")
+
+        # Auto-deplete linked bulk SKU if this retail SKU is packed in-store
+        if fulfilled > 0:
+            deplete_bulk_for_local_pack(sku, fulfilled, company_id, db)
 
     db.commit()
 

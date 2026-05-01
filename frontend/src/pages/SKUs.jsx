@@ -539,7 +539,7 @@ function BulkUploadModal({ categories, onClose, onImported }) {
 const BACKEND = 'http://localhost:8000'
 
 // ── SKU Form Modal ──────────────────────────────────────────────
-function SKUFormModal({ form, editId, categories, vendors, bins, saving, onSet, onSubmit, onClose, onImageFileReady }) {
+function SKUFormModal({ form, editId, categories, vendors, bins, saving, onSet, onSubmit, onClose, onImageFileReady, bulkLinks = [], setBulkLinks, allSkus = [] }) {
   const casePreview = form.case_size && form.unit_label
     ? `1 case = ${form.case_size} ${form.unit_label}`
     : null
@@ -551,6 +551,38 @@ function SKUFormModal({ form, editId, categories, vendors, bins, saving, onSet, 
   const [uploading, setUploading] = useState(false)
   const [binSearch, setBinSearch] = useState('')
   const [showBinDrop, setShowBinDrop] = useState(false)
+  const [packSearch, setPackSearch] = useState('')
+  const [showPackDrop, setShowPackDrop] = useState(false)
+
+  // Retail SKUs available to link (not already linked, not bulk themselves)
+  const linkableSkus = allSkus.filter(
+    s => !s.is_bulk_material && !bulkLinks.some(l => l.retail_sku_id === s.id)
+  )
+  const filteredLinkable = packSearch.trim()
+    ? linkableSkus.filter(s =>
+        s.product_name.toLowerCase().includes(packSearch.toLowerCase()) ||
+        s.sku_code.toLowerCase().includes(packSearch.toLowerCase())
+      )
+    : linkableSkus.slice(0, 8)
+
+  const addLink = (sku) => {
+    setBulkLinks(prev => [...prev, {
+      retail_sku_id:    sku.id,
+      retail_sku_name:  sku.product_name,
+      retail_sku_code:  sku.sku_code,
+      unit_weight:      sku.unit_weight,
+      unit_weight_uom:  sku.unit_weight_uom || 'g',
+      local_pack_active: false,
+    }])
+    setPackSearch('')
+    setShowPackDrop(false)
+  }
+
+  const removeLink = (retailSkuId) => setBulkLinks(prev => prev.filter(l => l.retail_sku_id !== retailSkuId))
+
+  const toggleLocalPack = (retailSkuId) => setBulkLinks(prev =>
+    prev.map(l => l.retail_sku_id === retailSkuId ? { ...l, local_pack_active: !l.local_pack_active } : l)
+  )
 
   const handleImageFile = async (file) => {
     if (!file) return
@@ -764,6 +796,128 @@ function SKUFormModal({ form, editId, categories, vendors, bins, saving, onSet, 
                   </p>
                 </label>
               </div>
+
+              {/* ── Linked Retail Packs (only shown for bulk materials) ── */}
+              {form.is_bulk_material && (
+                <div className="border border-blue-200 rounded-xl overflow-hidden">
+                  {/* Header */}
+                  <div className="bg-blue-50 px-3 py-2 flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-blue-800">Linked Retail Packs</p>
+                      <p className="text-[11px] text-blue-500 mt-0.5">
+                        Link the retail bags/packs produced from this bulk material
+                      </p>
+                    </div>
+                    <span className="text-xs bg-blue-100 text-blue-700 font-bold px-2 py-0.5 rounded-full">
+                      {bulkLinks.length}
+                    </span>
+                  </div>
+
+                  {/* Linked pack rows */}
+                  {bulkLinks.length > 0 && (
+                    <div className="divide-y divide-gray-100">
+                      {bulkLinks.map(link => (
+                        <div key={link.retail_sku_id} className="flex items-center gap-3 px-3 py-2.5 bg-white">
+                          {/* SKU info */}
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-gray-800 truncate">{link.retail_sku_name}</p>
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              <span className="text-[11px] font-mono text-gray-400">{link.retail_sku_code}</span>
+                              {link.unit_weight && (
+                                <span className="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded font-mono">
+                                  {link.unit_weight}{link.unit_weight_uom || 'g'}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Local Pack toggle */}
+                          <div className="flex flex-col items-center gap-0.5">
+                            <button
+                              type="button"
+                              onClick={() => toggleLocalPack(link.retail_sku_id)}
+                              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none ${
+                                link.local_pack_active ? 'bg-emerald-500' : 'bg-gray-200'
+                              }`}
+                            >
+                              <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
+                                link.local_pack_active ? 'translate-x-4.5' : 'translate-x-0.5'
+                              }`} />
+                            </button>
+                            <span className={`text-[10px] font-semibold ${link.local_pack_active ? 'text-emerald-600' : 'text-gray-400'}`}>
+                              {link.local_pack_active ? 'Local' : 'Packing Unit'}
+                            </span>
+                          </div>
+
+                          {/* Remove */}
+                          <button
+                            type="button"
+                            onClick={() => removeLink(link.retail_sku_id)}
+                            className="p-1 text-gray-300 hover:text-red-400 transition-colors flex-shrink-0"
+                          >
+                            <X size={14} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Add retail pack */}
+                  <div className="px-3 py-2 bg-gray-50 border-t border-gray-100 relative">
+                    {showPackDrop ? (
+                      <div>
+                        <input
+                          autoFocus
+                          type="text"
+                          className="input text-sm py-1.5"
+                          placeholder="Search retail SKU..."
+                          value={packSearch}
+                          onChange={e => setPackSearch(e.target.value)}
+                          onBlur={() => setTimeout(() => setShowPackDrop(false), 150)}
+                        />
+                        {filteredLinkable.length > 0 && (
+                          <div className="absolute left-3 right-3 top-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg z-50 max-h-44 overflow-y-auto">
+                            {filteredLinkable.map(s => (
+                              <button
+                                key={s.id}
+                                type="button"
+                                className="w-full text-left px-3 py-2 hover:bg-blue-50 flex items-center justify-between gap-2"
+                                onMouseDown={() => addLink(s)}
+                              >
+                                <span className="text-sm text-gray-800 truncate">{s.product_name}</span>
+                                <span className="text-xs text-gray-400 font-mono flex-shrink-0">{s.sku_code}</span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                        {filteredLinkable.length === 0 && packSearch && (
+                          <p className="text-xs text-gray-400 mt-1 px-1">No matching SKUs found</p>
+                        )}
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setShowPackDrop(true)}
+                        className="flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-700 font-medium"
+                      >
+                        <Plus size={14} /> Add retail pack
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Legend */}
+                  <div className="px-3 py-2 bg-gray-50 border-t border-gray-100 flex items-center gap-4">
+                    <div className="flex items-center gap-1.5">
+                      <span className="inline-block w-3 h-3 rounded-full bg-emerald-500" />
+                      <span className="text-[11px] text-gray-500">Local Pack — auto-deducts bulk stock on dispatch</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="inline-block w-3 h-3 rounded-full bg-gray-300" />
+                      <span className="text-[11px] text-gray-500">Packing Unit — tracked via Repacking module</span>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Show goods date on picking toggle */}
               <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-xl p-3">
@@ -1039,6 +1193,7 @@ export default function SKUs({ lang }) {
 
   const [form, setForm] = useState({ ...BLANK_FORM })
   const [bins, setBins] = useState([])
+  const [bulkLinks, setBulkLinks] = useState([])   // [{retail_sku_id, retail_sku_name, retail_sku_code, unit_weight, unit_weight_uom, local_pack_active}]
   const pendingImgFileRef = useRef(null)
 
   const toggleSelect = (id) => setSelectedIds(prev => {
@@ -1074,7 +1229,7 @@ export default function SKUs({ lang }) {
 
   const set = (key, val) => setForm(f => ({ ...f, [key]: val }))
 
-  const closeForm = () => { setShowForm(false); setEditId(null); setForm({ ...BLANK_FORM }); pendingImgFileRef.current = null }
+  const closeForm = () => { setShowForm(false); setEditId(null); setForm({ ...BLANK_FORM }); setBulkLinks([]); pendingImgFileRef.current = null }
 
   const handleSubmit = async () => {
     if (!form.sku_code.trim()) return alert('SKU Code is required')
@@ -1106,30 +1261,40 @@ export default function SKUs({ lang }) {
     }
 
     try {
+      let savedSkuId = editId
       if (editId) {
         await skuAPI.update(editId, data)
         showToast('✅ SKU updated')
       } else {
         const res = await skuAPI.create(data)
-        const newSkuId = res.data.id
+        savedSkuId = res.data.id
         const wh1 = parseInt(form.initial_wh1) || 0
         const wh2 = parseInt(form.initial_wh2) || 0
-        if (wh1 > 0) await settingsAPI.adjustInventory({ sku_id: newSkuId, warehouse: 'WH1', new_qty: wh1, reason: 'Initial stock entry' })
-        if (wh2 > 0) await settingsAPI.adjustInventory({ sku_id: newSkuId, warehouse: 'WH2', new_qty: wh2, reason: 'Initial stock entry' })
+        if (wh1 > 0) await settingsAPI.adjustInventory({ sku_id: savedSkuId, warehouse: 'WH1', new_qty: wh1, reason: 'Initial stock entry' })
+        if (wh2 > 0) await settingsAPI.adjustInventory({ sku_id: savedSkuId, warehouse: 'WH2', new_qty: wh2, reason: 'Initial stock entry' })
         // Upload pending product image
         if (pendingImgFileRef.current) {
-          try { await uploadAPI.productImage(newSkuId, pendingImgFileRef.current) } catch {}
+          try { await uploadAPI.productImage(savedSkuId, pendingImgFileRef.current) } catch {}
           pendingImgFileRef.current = null
         }
         // Assign bin location to WH1 inventory
         if (form.bin_location_id && wh1 > 0) {
           try {
             const invRes = await inventoryAPI.list({ search: data.sku_code })
-            const inv = invRes.data.find(i => i.sku_id === newSkuId && i.warehouse === 'WH1')
+            const inv = invRes.data.find(i => i.sku_id === savedSkuId && i.warehouse === 'WH1')
             if (inv) await API.post('/bin-locations/assign', { inventory_id: inv.id, bin_location_id: form.bin_location_id })
           } catch {}
         }
         showToast('✅ SKU created' + (wh1 + wh2 > 0 ? ` with ${wh1 + wh2} cases opening stock` : ''))
+      }
+      // Save bulk ↔ retail links (always, even if empty — replaces whatever was there)
+      if (data.is_bulk_material && savedSkuId) {
+        try {
+          await skuAPI.setBulkLinks(savedSkuId, bulkLinks.map(l => ({
+            retail_sku_id:    l.retail_sku_id,
+            local_pack_active: l.local_pack_active,
+          })))
+        } catch {}
       }
       closeForm()
       load()
@@ -1141,8 +1306,13 @@ export default function SKUs({ lang }) {
 
   const startEdit = (sku) => {
     setForm({ ...BLANK_FORM, ...sku, vendor_id: sku.vendor_id || '', pallet_size: sku.pallet_size ?? '', cost_price: sku.cost_price ?? '', selling_price: sku.selling_price ?? '', show_goods_date_on_picking: sku.show_goods_date_on_picking ?? false, require_expiry_entry: sku.require_expiry_entry ?? false, is_bulk_material: sku.is_bulk_material ?? false, unit_weight: sku.unit_weight ?? '', unit_weight_uom: sku.unit_weight_uom || 'g' })
+    setBulkLinks([])
     setEditId(sku.id)
     setShowForm(true)
+    // Load existing bulk links if this is a bulk material
+    if (sku.is_bulk_material) {
+      skuAPI.getBulkLinks(sku.id).then(r => setBulkLinks(r.data)).catch(() => {})
+    }
   }
 
   const handleDelete = (sku) => {
@@ -1197,6 +1367,9 @@ export default function SKUs({ lang }) {
           onSubmit={handleSubmit}
           onClose={closeForm}
           onImageFileReady={(f) => { pendingImgFileRef.current = f }}
+          bulkLinks={bulkLinks}
+          setBulkLinks={setBulkLinks}
+          allSkus={skus}
         />
       )}
       {showBulkUpload && (

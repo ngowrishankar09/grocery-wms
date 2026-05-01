@@ -8,7 +8,7 @@ from datetime import datetime
 import sys, os
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from database import get_db
-from models import SKU, Vendor, Inventory, Category
+from models import SKU, Vendor, Inventory, Category, SkuBulkLink, BillOfMaterial
 from security import get_current_user, get_company_id
 
 router = APIRouter(prefix="/skus", tags=["SKUs"])
@@ -242,6 +242,115 @@ def update_sku(
 
     db.commit()
     return {"message": "Updated successfully"}
+
+
+# ─── Bulk ↔ Retail link helpers ───────────────────────────────
+
+def _to_kg(weight, uom):
+    """Convert a weight value + uom string to kg."""
+    if not weight:
+        return None
+    uom = (uom or "g").lower()
+    if uom == "kg":  return weight
+    if uom == "g":   return weight / 1000
+    if uom == "lbs": return weight * 0.453592
+    if uom == "oz":  return weight * 0.0283495
+    return weight / 1000  # fallback: treat as grams
+
+
+class BulkLinkItem(BaseModel):
+    retail_sku_id:    int
+    local_pack_active: bool = False
+
+
+@router.get("/{sku_id}/bulk-links")
+def get_bulk_links(
+    sku_id: int,
+    db: Session = Depends(get_db),
+    company_id: int = Depends(get_company_id),
+):
+    """Return all retail SKUs linked to a bulk SKU, with local_pack_active flag."""
+    links = db.query(SkuBulkLink).filter(
+        SkuBulkLink.bulk_sku_id == sku_id,
+        SkuBulkLink.company_id  == company_id,
+    ).all()
+
+    if not links:
+        return []
+
+    retail_ids  = [l.retail_sku_id for l in links]
+    retail_skus = db.query(SKU).filter(SKU.id.in_(retail_ids)).all()
+    sku_map     = {s.id: s for s in retail_skus}
+
+    return [
+        {
+            "retail_sku_id":    l.retail_sku_id,
+            "retail_sku_name":  sku_map[l.retail_sku_id].product_name if l.retail_sku_id in sku_map else "Unknown",
+            "retail_sku_code":  sku_map[l.retail_sku_id].sku_code     if l.retail_sku_id in sku_map else "",
+            "unit_weight":      sku_map[l.retail_sku_id].unit_weight   if l.retail_sku_id in sku_map else None,
+            "unit_weight_uom":  (sku_map[l.retail_sku_id].unit_weight_uom or "g") if l.retail_sku_id in sku_map else "g",
+            "local_pack_active": l.local_pack_active,
+        }
+        for l in links
+    ]
+
+
+@router.put("/{sku_id}/bulk-links")
+def set_bulk_links(
+    sku_id: int,
+    links:  List[BulkLinkItem],
+    db:     Session = Depends(get_db),
+    company_id: int = Depends(get_company_id),
+):
+    """Replace all retail-SKU links for a bulk SKU.
+    Also auto-creates a BillOfMaterial record for each link that doesn't have one yet,
+    so the Repacking module populates automatically.
+    """
+    # Verify bulk SKU belongs to this company
+    bulk_sku = db.query(SKU).filter(SKU.id == sku_id, SKU.company_id == company_id).first()
+    if not bulk_sku:
+        raise HTTPException(status_code=404, detail="Bulk SKU not found")
+
+    # Remove all existing links for this bulk SKU
+    db.query(SkuBulkLink).filter(
+        SkuBulkLink.bulk_sku_id == sku_id,
+        SkuBulkLink.company_id  == company_id,
+    ).delete()
+
+    for item in links:
+        retail_sku = db.query(SKU).filter(
+            SKU.id == item.retail_sku_id,
+            SKU.company_id == company_id,
+        ).first()
+        if not retail_sku:
+            continue
+
+        # Create link record
+        db.add(SkuBulkLink(
+            company_id        = company_id,
+            bulk_sku_id       = sku_id,
+            retail_sku_id     = item.retail_sku_id,
+            local_pack_active = item.local_pack_active,
+        ))
+
+        # Auto-upsert BOM so Repacking module sees the relationship
+        existing_bom = db.query(BillOfMaterial).filter(
+            BillOfMaterial.input_sku_id  == sku_id,
+            BillOfMaterial.output_sku_id == item.retail_sku_id,
+            BillOfMaterial.company_id    == company_id,
+        ).first()
+        if not existing_bom:
+            unit_kg = _to_kg(retail_sku.unit_weight, retail_sku.unit_weight_uom) or 0.5
+            db.add(BillOfMaterial(
+                company_id     = company_id,
+                input_sku_id   = sku_id,
+                output_sku_id  = item.retail_sku_id,
+                qty_per_unit   = unit_kg,
+                unit           = "kg",
+            ))
+
+    db.commit()
+    return {"message": "Links updated", "count": len(links)}
 
 
 @router.get("/categories/list")
