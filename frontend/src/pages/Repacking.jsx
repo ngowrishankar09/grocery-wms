@@ -298,6 +298,33 @@ function BOMTab({ skus, refreshSkus, onGoToStock }) {
   const [bulkWeightInput, setBulkWeightInput]         = useState('')  // bag weight for existing bulk SKU
   const [bulkWeightUomInput, setBulkWeightUomInput]   = useState('kg')
   const [creatingNewBulk, setCreatingNewBulk]         = useState(false) // "add a new bulk material" mode when hasBulkFlag
+  // Inline bulk edit (pencil on card header)
+  const [inlineBulkId,   setInlineBulkId]   = useState(null)
+  const [inlineBulkWeight, setInlineBulkWeight] = useState('')
+  const [inlineBulkUom,    setInlineBulkUom]    = useState('kg')
+  const [inlineBulkCost,   setInlineBulkCost]   = useState('')
+  const [inlineBulkSaving, setInlineBulkSaving] = useState(false)
+
+  const openInlineBulkEdit = (sku) => {
+    setInlineBulkId(sku.id)
+    setInlineBulkWeight(sku.unit_weight ? String(sku.unit_weight) : '')
+    setInlineBulkUom(sku.unit_weight_uom || 'kg')
+    setInlineBulkCost(sku.cost_price ? String(sku.cost_price) : '')
+  }
+  const saveInlineBulkEdit = async () => {
+    if (!inlineBulkId) return
+    setInlineBulkSaving(true)
+    const patch = {}
+    if (inlineBulkWeight) { patch.unit_weight = parseFloat(inlineBulkWeight); patch.unit_weight_uom = inlineBulkUom }
+    if (inlineBulkCost)   patch.cost_price = parseFloat(inlineBulkCost)
+    try {
+      await skuAPI.update(inlineBulkId, patch)
+      await refreshSkus()
+      setInlineBulkId(null)
+    } catch (err) {
+      alert('Could not save: ' + (err.response?.data?.detail || err.message))
+    } finally { setInlineBulkSaving(false) }
+  }
 
   // ── Form state ───────────────────────────────────────────────
   // input_sku_id: the one bulk material selected for this form session
@@ -870,6 +897,17 @@ function BOMTab({ skus, refreshSkus, onGoToStock }) {
                     </button>
                   )}
                   <button
+                    type="button"
+                    onClick={() => {
+                      const sku = skus.find(s => String(s.id) === String(group.bulk_id))
+                      if (sku) openInlineBulkEdit(sku)
+                    }}
+                    className="text-xs text-gray-500 hover:text-gray-800 border border-gray-200 hover:border-gray-400 px-2 py-1 rounded-lg transition-colors flex items-center gap-1"
+                    title="Edit bulk material settings"
+                  >
+                    <Edit2 size={11} /> Edit
+                  </button>
+                  <button
                     onClick={() => openNew(group.bulk_id)}
                     className="text-xs text-blue-600 hover:text-blue-800 border border-blue-200 hover:border-blue-400 px-2.5 py-1 rounded-lg transition-colors flex items-center gap-1"
                   >
@@ -877,6 +915,41 @@ function BOMTab({ skus, refreshSkus, onGoToStock }) {
                   </button>
                 </div>
               </div>
+
+              {/* Inline bulk material edit */}
+              {inlineBulkId === group.bulk_id && (
+                <div className="px-4 py-3 bg-blue-50 border-b border-blue-100 flex flex-wrap items-end gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-blue-700 mb-1">Bag / sack size</label>
+                    <div className="flex gap-1.5">
+                      <input type="number" step="0.01" min="0.01" className="input w-24 text-sm"
+                        placeholder="e.g. 25"
+                        value={inlineBulkWeight} onChange={e => setInlineBulkWeight(e.target.value)} />
+                      <select className="input w-16 text-sm" value={inlineBulkUom} onChange={e => setInlineBulkUom(e.target.value)}>
+                        <option value="kg">kg</option>
+                        <option value="g">g</option>
+                        <option value="lbs">lbs</option>
+                        <option value="oz">oz</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-blue-700 mb-1">Cost per kg ($)</label>
+                    <input type="number" step="0.01" min="0" className="input w-28 text-sm"
+                      placeholder="e.g. 2.50"
+                      value={inlineBulkCost} onChange={e => setInlineBulkCost(e.target.value)} />
+                  </div>
+                  <div className="flex gap-2 pb-0.5">
+                    <button type="button" onClick={saveInlineBulkEdit} disabled={inlineBulkSaving}
+                      className="btn-primary text-xs px-3 py-1.5 flex items-center gap-1">
+                      {inlineBulkSaving ? <Loader2 size={11} className="animate-spin" /> : <Save size={11} />}
+                      Save
+                    </button>
+                    <button type="button" onClick={() => setInlineBulkId(null)}
+                      className="btn-secondary text-xs px-3 py-1.5">Cancel</button>
+                  </div>
+                </div>
+              )}
 
               {/* Retail outputs table */}
               <table className="w-full text-sm">
