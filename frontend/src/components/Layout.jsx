@@ -12,6 +12,17 @@ import {
   GitBranch, FileX, Scale, Activity, CreditCard, DollarSign, ScanLine, Factory
 } from 'lucide-react'
 
+// Section → icon + accent colour
+const GROUP_META = {
+  'Warehouse':   { icon: Warehouse,    color: 'text-cyan-400',    dot: 'bg-cyan-500' },
+  'Fulfilment':  { icon: ShoppingCart, color: 'text-violet-400',  dot: 'bg-violet-500' },
+  'Production':  { icon: Factory,      color: 'text-orange-400',  dot: 'bg-orange-500' },
+  'Procurement': { icon: ShoppingBag,  color: 'text-emerald-400', dot: 'bg-emerald-500' },
+  'Finance':     { icon: DollarSign,   color: 'text-yellow-400',  dot: 'bg-yellow-500' },
+  'Reporting':   { icon: BarChart2,    color: 'text-pink-400',    dot: 'bg-pink-500' },
+  'Admin':       { icon: Settings,     color: 'text-gray-400',    dot: 'bg-gray-500' },
+}
+
 const navGroups = (t) => [
   {
     label: 'Warehouse',
@@ -350,33 +361,41 @@ function SidebarContent({ t, lang, setLang, onNavClick, user, logout }) {
 
   return (
     <>
-      <nav className="flex-1 p-2 overflow-y-auto">
+      <nav className="flex-1 px-3 py-2 overflow-y-auto space-y-0.5">
         {filteredGroups.map((group) => {
           const isOpen = !!expanded[group.label]
           const hasActive = group.items.some(i =>
             location.pathname === i.to || location.pathname.startsWith(i.to + '/')
           )
+          const meta = GROUP_META[group.label] || GROUP_META['Admin']
+          const GroupIcon = meta.icon
           return (
-            <div key={group.label} className="mb-0.5">
-              {/* ── Group header (toggle button) ── */}
+            <div key={group.label} className="mb-1">
+              {/* ── Group header ── */}
               <button
                 onClick={() => toggle(group.label)}
-                className={`w-full flex items-center justify-between px-3 py-1.5 rounded-lg transition-colors group ${
+                className={`w-full flex items-center justify-between px-2.5 py-2 rounded-xl transition-all ${
                   hasActive
-                    ? 'text-blue-400'
-                    : 'text-gray-500 hover:text-gray-300'
-                } hover:bg-gray-800`}
+                    ? 'bg-gray-800/80 text-white'
+                    : 'text-gray-500 hover:text-gray-300 hover:bg-gray-800/50'
+                }`}
               >
-                <span className="text-[10px] font-bold uppercase tracking-widest">{group.label}</span>
+                <div className="flex items-center gap-2.5">
+                  <div className={`p-1 rounded-lg ${hasActive ? 'bg-gray-700' : 'bg-gray-800'}`}>
+                    <GroupIcon size={13} className={hasActive ? meta.color : 'text-gray-500'} />
+                  </div>
+                  <span className="text-[11px] font-bold uppercase tracking-widest">{group.label}</span>
+                  {hasActive && <span className={`w-1.5 h-1.5 rounded-full ${meta.dot} flex-shrink-0`} />}
+                </div>
                 <ChevronDown
                   size={11}
-                  className={`flex-shrink-0 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
+                  className={`flex-shrink-0 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''} opacity-60`}
                 />
               </button>
 
-              {/* ── Nav items (visible when open) ── */}
+              {/* ── Nav items ── */}
               {isOpen && (
-                <div className="mt-0.5 mb-2 space-y-0.5">
+                <div className="mt-0.5 ml-1 space-y-0.5">
                   {group.items.map(({ to, icon: Icon, label }) => (
                     <NavLink
                       key={to}
@@ -384,15 +403,15 @@ function SidebarContent({ t, lang, setLang, onNavClick, user, logout }) {
                       end={to === '/app'}
                       onClick={onNavClick}
                       className={({ isActive }) =>
-                        `flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                        `flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all ${
                           isActive
-                            ? 'bg-blue-600 text-white shadow-sm'
-                            : 'text-gray-400 hover:bg-gray-800 hover:text-white'
+                            ? `bg-gradient-to-r from-blue-600 to-blue-500 text-white shadow-md shadow-blue-900/30`
+                            : 'text-gray-400 hover:bg-gray-800 hover:text-gray-100'
                         }`
                       }
                     >
-                      <Icon size={16} />
-                      {label}
+                      <Icon size={15} className="flex-shrink-0" />
+                      <span className="truncate">{label}</span>
                     </NavLink>
                   ))}
                 </div>
@@ -402,48 +421,36 @@ function SidebarContent({ t, lang, setLang, onNavClick, user, logout }) {
         })}
       </nav>
 
-      {/* Language toggle */}
-      <div className="px-4 py-3 border-t border-gray-800">
-        <div className="flex items-center gap-2 text-[11px] text-gray-500 mb-2">
-          <Globe size={12} /> Language / Idioma
-        </div>
-        <div className="flex gap-2">
-          <button
-            onClick={() => setLang('en')}
-            className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-              lang === 'en' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white'
-            }`}
-          >
-            English
-          </button>
-          <button
-            onClick={() => setLang('es')}
-            className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-              lang === 'es' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white'
-            }`}
-          >
-            Español
-          </button>
+      {/* Language toggle — compact */}
+      <div className="px-3 pb-1 border-t border-gray-800/60">
+        <div className="flex gap-1.5 mt-2">
+          {['en', 'es'].map(l => (
+            <button key={l} onClick={() => setLang(l)}
+              className={`flex-1 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+                lang === l
+                  ? 'bg-blue-600 text-white shadow-sm shadow-blue-900/40'
+                  : 'bg-gray-800 text-gray-500 hover:bg-gray-700 hover:text-gray-300'
+              }`}>
+              {l === 'en' ? '🇬🇧 EN' : '🇪🇸 ES'}
+            </button>
+          ))}
         </div>
       </div>
 
-      {/* User panel (mobile / sidebar) */}
+      {/* User panel */}
       {user && (
-        <div className="px-3 py-3 border-t border-gray-800">
-          <div className="flex items-center gap-3">
-            <div className={`w-8 h-8 rounded-full ${ROLE_COLORS[user.role] || 'bg-gray-600'} flex items-center justify-center text-white text-xs font-bold flex-shrink-0`}>
+        <div className="px-3 py-3 border-t border-gray-800/60">
+          <div className="flex items-center gap-2.5 bg-gray-800/60 rounded-2xl px-3 py-2.5">
+            <div className={`w-8 h-8 rounded-xl ${ROLE_COLORS[user.role] || 'bg-gray-600'} flex items-center justify-center text-white text-xs font-bold flex-shrink-0 shadow-sm`}>
               {initials}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-white truncate">{user.full_name || user.username}</p>
-              <p className="text-xs text-gray-400 capitalize">{user.role}</p>
+              <p className="text-sm font-semibold text-white truncate leading-none">{user.full_name || user.username}</p>
+              <p className="text-[11px] text-gray-400 capitalize mt-0.5 font-medium">{user.role}</p>
             </div>
-            <button
-              onClick={logout}
-              title="Logout"
-              className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-gray-700 transition-colors flex-shrink-0"
-            >
-              <LogOut size={15} />
+            <button onClick={logout} title="Logout"
+              className="p-1.5 rounded-xl text-gray-500 hover:text-red-400 hover:bg-gray-700 transition-colors flex-shrink-0">
+              <LogOut size={14} />
             </button>
           </div>
         </div>
@@ -468,16 +475,16 @@ export default function Layout({ children, lang, setLang }) {
     <div className="flex h-screen overflow-hidden bg-gray-50">
 
       {/* ── Desktop sidebar ── */}
-      <aside className="hidden md:flex w-60 bg-gray-900 flex-col flex-shrink-0">
+      <aside className="hidden md:flex w-64 bg-gray-900 flex-col flex-shrink-0 border-r border-gray-800/50">
         {/* Brand header */}
-        <div className="p-4 border-b border-gray-800">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 bg-blue-600 rounded-xl flex items-center justify-center flex-shrink-0">
+        <div className="px-4 py-4 border-b border-gray-800/60">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center flex-shrink-0 shadow-lg shadow-blue-900/40">
               <Truck size={17} className="text-white" />
             </div>
-            <div>
-              <h1 className="text-[15px] font-bold text-white leading-none">RapidDock</h1>
-              <p className="text-[10px] text-blue-400 font-semibold tracking-widest mt-0.5">WMS PLATFORM</p>
+            <div className="min-w-0">
+              <h1 className="text-[15px] font-bold text-white leading-none tracking-tight">RapidDock</h1>
+              <p className="text-[10px] text-blue-400 font-bold tracking-widest mt-0.5 uppercase">WMS Platform</p>
             </div>
           </div>
         </div>

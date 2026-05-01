@@ -1,85 +1,288 @@
 import { useEffect, useState } from 'react'
 import { dashboardAPI } from '../api/client'
-import { useT } from '../i18n/translations'
 import { useAuth } from '../context/AuthContext'
 import {
-  AlertTriangle, Package, TrendingDown, Clock, ShoppingCart, ArrowRight,
-  TrendingUp, Archive, BarChart2, RefreshCw, Zap, CheckCircle,
-  Receipt, Truck, UserCircle2, RotateCcw, FileText, Plus,
-  Activity, MapPin, ChevronRight, Boxes, DollarSign, TrendingUp as Trend
+  AlertTriangle, Package, TrendingDown, Clock, ShoppingCart,
+  TrendingUp, Archive, RefreshCw, CheckCircle,
+  Receipt, Truck, RotateCcw, FileText, Plus,
+  Activity, DollarSign, ArrowUpRight, ArrowDownRight,
+  Zap, ChevronRight, Boxes, Star, Sparkles,
+  SendHorizonal, ClipboardList, BarChart2,
 } from 'lucide-react'
 import { Link, useNavigate } from 'react-router-dom'
 
-// ── Tiny helpers ──────────────────────────────────────────────
-function StatCard({ label, value, sub, icon: Icon, color, to, alert }) {
-  const content = (
-    <div className={`card flex items-center gap-4 ${to ? 'hover:shadow-md transition-shadow cursor-pointer' : ''} ${alert ? 'border-l-4 border-red-400' : ''}`}>
-      <div className={`p-3 rounded-xl flex-shrink-0 ${color}`}>
-        <Icon size={22} className="text-white" />
-      </div>
-      <div className="min-w-0">
-        <div className="text-2xl font-bold text-gray-900 leading-none">{value}</div>
-        <div className="text-sm text-gray-500 mt-0.5">{label}</div>
-        {sub && <div className="text-xs text-gray-400 mt-0.5">{sub}</div>}
-      </div>
-    </div>
-  )
-  return to ? <Link to={to}>{content}</Link> : content
-}
-
-function MiniStatCard({ label, value, color = 'text-gray-900', sub }) {
-  return (
-    <div className="text-center">
-      <div className={`text-xl font-bold ${color} leading-none`}>{value}</div>
-      <div className="text-xs text-gray-500 mt-0.5">{label}</div>
-      {sub && <div className="text-[10px] text-gray-400">{sub}</div>}
-    </div>
-  )
-}
-
-// ── Activity Feed ─────────────────────────────────────────────
-const ACTIVITY_ICONS = {
-  dispatch:  { Icon: Truck,       bg: 'bg-blue-100',   text: 'text-blue-600'   },
-  receiving: { Icon: Package,     bg: 'bg-green-100',  text: 'text-green-600'  },
-  invoice:   { Icon: Receipt,     bg: 'bg-purple-100', text: 'text-purple-600' },
-  return:    { Icon: RotateCcw,   bg: 'bg-orange-100', text: 'text-orange-600' },
-}
+// ── Helpers ───────────────────────────────────────────────────
+const $$ = (v) => `$${(v ?? 0).toLocaleString('en', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
 
 function timeAgo(iso) {
   if (!iso) return ''
   const diff = (Date.now() - new Date(iso).getTime()) / 1000
   if (diff < 60)    return 'just now'
-  if (diff < 3600)  return `${Math.floor(diff / 60)}m ago`
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
-  return `${Math.floor(diff / 86400)}d ago`
+  if (diff < 3600)  return `${Math.floor(diff / 60)}m`
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h`
+  return `${Math.floor(diff / 86400)}d`
 }
 
-function ActivityFeed({ items }) {
-  if (!items || items.length === 0) {
-    return (
-      <div className="py-8 text-center text-gray-400">
-        <Activity size={28} className="mx-auto mb-2 opacity-30" />
-        <p className="text-sm">No recent activity</p>
-      </div>
-    )
-  }
+// ── Business Health Score ─────────────────────────────────────
+function healthScore(summary) {
+  let score = 100
+  if (summary.stockout_count  > 0) score -= Math.min(summary.stockout_count * 8, 24)
+  if (summary.overdue_orders  > 0) score -= Math.min(summary.overdue_orders * 6, 18)
+  if (summary.invoices_overdue > 0) score -= Math.min(summary.invoices_overdue * 5, 15)
+  if (summary.expiring_critical > 0) score -= Math.min(summary.expiring_critical * 4, 12)
+  return Math.max(0, score)
+}
+
+function HealthRing({ score }) {
+  const r = 22, circ = 2 * Math.PI * r
+  const progress = circ - (score / 100) * circ
+  const color = score >= 85 ? '#10b981' : score >= 65 ? '#f59e0b' : '#ef4444'
+  const label = score >= 85 ? 'Excellent' : score >= 65 ? 'Needs Attention' : 'Critical'
   return (
-    <div className="divide-y divide-gray-50">
-      {items.map((item, i) => {
-        const { Icon, bg, text } = ACTIVITY_ICONS[item.type] || ACTIVITY_ICONS['dispatch']
-        return (
-          <Link key={i} to={item.link || '/'} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors">
-            <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${bg}`}>
-              <Icon size={14} className={text} />
+    <div className="flex flex-col items-center gap-1">
+      <div className="relative w-14 h-14">
+        <svg viewBox="0 0 52 52" className="w-14 h-14 -rotate-90">
+          <circle cx="26" cy="26" r={r} fill="none" stroke="rgba(255,255,255,0.15)" strokeWidth="5" />
+          <circle cx="26" cy="26" r={r} fill="none" stroke={color} strokeWidth="5"
+            strokeLinecap="round" strokeDasharray={circ} strokeDashoffset={progress}
+            style={{ transition: 'stroke-dashoffset 1s ease' }} />
+        </svg>
+        <span className="absolute inset-0 flex items-center justify-center text-sm font-bold text-white">{score}</span>
+      </div>
+      <span className="text-[11px] font-semibold uppercase tracking-wide" style={{ color }}>{label}</span>
+    </div>
+  )
+}
+
+// ── Hero Card ─────────────────────────────────────────────────
+function HeroCard({ user, summary, onRefresh, refreshing }) {
+  const hour = new Date().getHours()
+  const greeting = hour < 5 ? '🌙 Good night' : hour < 12 ? '☀️ Good morning' : hour < 17 ? '👋 Good afternoon' : '🌇 Good evening'
+  const name = user?.full_name?.split(' ')[0] || user?.username || ''
+  const date = new Date().toLocaleDateString('en', { weekday: 'long', month: 'long', day: 'numeric' })
+  const score = healthScore(summary)
+
+  const kpis = [
+    {
+      label: 'Revenue This Month',
+      value: $$(summary.invoiced_this_month),
+      sub: `${$$(summary.invoice_outstanding)} outstanding`,
+      subWarn: summary.invoices_overdue > 0,
+      icon: DollarSign,
+      to: '/invoices',
+    },
+    {
+      label: 'Pending Orders',
+      value: summary.pending_orders ?? 0,
+      sub: summary.overdue_orders > 0 ? `${summary.overdue_orders} overdue ⚠️` : '✓ all on time',
+      subWarn: summary.overdue_orders > 0,
+      icon: ShoppingCart,
+      to: '/orders',
+    },
+    {
+      label: 'Cases in Stock',
+      value: (summary.total_cases_in_stock ?? 0).toLocaleString(),
+      sub: summary.stockout_count > 0 ? `${summary.stockout_count} stockout${summary.stockout_count > 1 ? 's' : ''} ⚠️` : '✓ fully stocked',
+      subWarn: summary.stockout_count > 0,
+      icon: Boxes,
+      to: '/inventory',
+    },
+    {
+      label: "Today's Deliveries",
+      value: summary.runs_today ?? 0,
+      sub: `${summary.runs_completed_today ?? 0} completed · ${summary.drivers_on_route ?? 0} on route`,
+      icon: Truck,
+      to: '/drivers',
+    },
+  ]
+
+  return (
+    <div className="relative overflow-hidden rounded-3xl shadow-xl"
+      style={{ background: 'linear-gradient(135deg, #1e3a8a 0%, #1d4ed8 40%, #4f46e5 100%)' }}>
+      {/* Decorative blobs */}
+      <div className="pointer-events-none absolute -right-16 -top-16 h-64 w-64 rounded-full opacity-10 bg-white" />
+      <div className="pointer-events-none absolute -bottom-12 -left-8 h-48 w-48 rounded-full opacity-10 bg-white" />
+      <div className="pointer-events-none absolute right-1/3 bottom-0 h-32 w-32 rounded-full opacity-5 bg-white" />
+
+      <div className="relative p-6 md:p-8">
+        {/* Top row */}
+        <div className="flex items-start justify-between mb-6">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <span className="inline-block h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="text-xs font-bold uppercase tracking-widest text-blue-200">Live Dashboard</span>
             </div>
-            <div className="flex-1 min-w-0">
-              <div className="text-sm font-medium text-gray-800 truncate">{item.title}</div>
-              <div className="text-xs text-gray-400 truncate">{item.detail}</div>
+            <h1 className="text-2xl md:text-3xl font-bold text-white leading-tight">
+              {greeting}{name ? `, ${name}` : ''}!
+            </h1>
+            <p className="text-blue-200 text-sm mt-1">{date}</p>
+          </div>
+          <div className="flex items-center gap-4">
+            <HealthRing score={score} />
+            <button onClick={onRefresh} disabled={refreshing}
+              className="hidden md:flex items-center gap-1.5 rounded-xl bg-white/10 px-3 py-2 text-sm text-blue-100 hover:bg-white/20 transition-all disabled:opacity-50">
+              <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
+              Refresh
+            </button>
+          </div>
+        </div>
+
+        {/* KPI grid */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          {kpis.map(({ label, value, sub, subWarn, icon: Icon, to }) => (
+            <Link key={label} to={to}
+              className="group bg-white/10 hover:bg-white/20 rounded-2xl p-4 transition-all cursor-pointer border border-white/10 hover:border-white/25 hover:shadow-lg">
+              <div className="flex items-center justify-between mb-2">
+                <div className="p-1.5 rounded-lg bg-white/10">
+                  <Icon size={14} className="text-blue-200" />
+                </div>
+                <ArrowUpRight size={13} className="text-white/30 group-hover:text-white/60 transition-colors" />
+              </div>
+              <div className="text-xl md:text-2xl font-bold text-white leading-none mb-1">{value}</div>
+              <div className="text-[11px] text-blue-200 font-medium">{label}</div>
+              <div className={`text-[10px] mt-0.5 ${subWarn ? 'text-amber-300 font-semibold' : 'text-blue-300'}`}>{sub}</div>
+            </Link>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Needs Your Attention ──────────────────────────────────────
+function AttentionPanel({ summary, overdueOrders, expiringItems }) {
+  const items = []
+
+  if (summary.invoices_overdue > 0)
+    items.push({
+      priority: 'urgent',
+      emoji: '💸',
+      title: `${summary.invoices_overdue} overdue invoice${summary.invoices_overdue > 1 ? 's' : ''}`,
+      detail: `${$$(summary.invoice_outstanding)} outstanding — collect before it impacts cash flow`,
+      action: 'Manage Invoices',
+      to: '/invoices',
+    })
+
+  if ((summary.orders_ready_to_dispatch ?? 0) > 0)
+    items.push({
+      priority: 'urgent',
+      emoji: '📦',
+      title: `${summary.orders_ready_to_dispatch} order${summary.orders_ready_to_dispatch > 1 ? 's' : ''} ready to dispatch`,
+      detail: 'Customers are waiting — get these out today',
+      action: 'Go to Dispatch',
+      to: '/dispatch',
+    })
+
+  if (summary.overdue_orders > 0)
+    items.push({
+      priority: 'high',
+      emoji: '⏰',
+      title: `${summary.overdue_orders} overdue order${summary.overdue_orders > 1 ? 's' : ''}`,
+      detail: overdueOrders?.[0] ? `Oldest: ${overdueOrders[0].store_name} (${overdueOrders[0].days_pending}d)` : 'These orders are past due',
+      action: 'Review Orders',
+      to: '/orders',
+    })
+
+  if (summary.stockout_count > 0)
+    items.push({
+      priority: 'high',
+      emoji: '🚨',
+      title: `${summary.stockout_count} product${summary.stockout_count > 1 ? 's' : ''} out of stock`,
+      detail: 'You cannot fulfill orders for these items until restocked',
+      action: 'Check Inventory',
+      to: '/inventory',
+    })
+
+  if ((summary.orders_awaiting_invoice ?? 0) > 0)
+    items.push({
+      priority: 'medium',
+      emoji: '🧾',
+      title: `${summary.orders_awaiting_invoice} order${summary.orders_awaiting_invoice > 1 ? 's' : ''} awaiting invoice`,
+      detail: 'Dispatched orders that still need to be invoiced',
+      action: 'Create Invoices',
+      to: '/invoices',
+    })
+
+  if (summary.expiring_critical > 0)
+    items.push({
+      priority: 'medium',
+      emoji: '⏳',
+      title: `${summary.expiring_critical} batch${summary.expiring_critical > 1 ? 'es' : ''} expiring within 30 days`,
+      detail: expiringItems?.[0] ? `${expiringItems[0].product_name} — ${expiringItems[0].cases_remaining} cases, ${expiringItems[0].days_to_expiry}d left` : 'Act fast to avoid waste',
+      action: 'Expiry Report',
+      to: '/reports',
+    })
+
+  if (summary.low_stock_count > 0)
+    items.push({
+      priority: 'low',
+      emoji: '📉',
+      title: `${summary.low_stock_count} product${summary.low_stock_count > 1 ? 's' : ''} running low`,
+      detail: 'Consider raising purchase orders before they run out',
+      action: 'View Inventory',
+      to: '/inventory',
+    })
+
+  const PRIORITY = { urgent: 0, high: 1, medium: 2, low: 3 }
+  items.sort((a, b) => PRIORITY[a.priority] - PRIORITY[b.priority])
+
+  const BADGE = {
+    urgent: 'bg-red-100 text-red-700 border border-red-200',
+    high:   'bg-amber-100 text-amber-700 border border-amber-200',
+    medium: 'bg-blue-100 text-blue-700 border border-blue-200',
+    low:    'bg-gray-100 text-gray-600 border border-gray-200',
+  }
+  const CARD = {
+    urgent: 'border-l-4 border-l-red-400 bg-red-50/50',
+    high:   'border-l-4 border-l-amber-400 bg-amber-50/50',
+    medium: 'border-l-4 border-l-blue-400 bg-blue-50/50',
+    low:    'border-l-4 border-l-gray-300 bg-gray-50/30',
+  }
+
+  return (
+    <div className="card !p-0 overflow-hidden flex flex-col h-full">
+      <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between bg-gradient-to-r from-slate-50 to-white">
+        <div className="flex items-center gap-2">
+          <div className="p-1.5 bg-amber-100 rounded-lg">
+            <Zap size={15} className="text-amber-600" />
+          </div>
+          <div>
+            <h3 className="font-bold text-gray-900 text-sm">Needs Your Attention</h3>
+            <p className="text-[11px] text-gray-400">{items.length === 0 ? 'All clear today 🎉' : `${items.filter(i => i.priority === 'urgent' || i.priority === 'high').length} urgent item${items.filter(i => i.priority === 'urgent' || i.priority === 'high').length !== 1 ? 's' : ''}`}</p>
+          </div>
+        </div>
+        {items.length > 0 && (
+          <span className="text-xs font-bold text-amber-700 bg-amber-100 px-2 py-1 rounded-full">{items.length}</span>
+        )}
+      </div>
+
+      <div className="flex-1 divide-y divide-gray-50">
+        {items.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-12 text-center px-6">
+            <div className="text-5xl mb-3">🎉</div>
+            <p className="font-semibold text-gray-700">Everything looks great!</p>
+            <p className="text-sm text-gray-400 mt-1">No urgent items need your attention right now</p>
+          </div>
+        ) : (
+          items.map((item, i) => (
+            <div key={i} className={`flex items-start gap-3 px-5 py-3.5 ${CARD[item.priority]}`}>
+              <span className="text-xl leading-none mt-0.5 flex-shrink-0">{item.emoji}</span>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-start gap-2 flex-wrap">
+                  <span className="font-semibold text-gray-800 text-sm">{item.title}</span>
+                  <span className={`text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full ${BADGE[item.priority]}`}>{item.priority}</span>
+                </div>
+                <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">{item.detail}</p>
+              </div>
+              <Link to={item.to}
+                className="flex-shrink-0 text-xs font-semibold text-blue-600 hover:text-blue-800 flex items-center gap-1 whitespace-nowrap bg-white border border-blue-200 hover:border-blue-400 rounded-lg px-2.5 py-1.5 transition-all hover:shadow-sm">
+                {item.action}
+                <ChevronRight size={11} />
+              </Link>
             </div>
-            <div className="text-xs text-gray-300 flex-shrink-0">{timeAgo(item.time)}</div>
-          </Link>
-        )
-      })}
+          ))
+        )}
+      </div>
     </div>
   )
 }
@@ -88,248 +291,101 @@ function ActivityFeed({ items }) {
 function QuickActions() {
   const navigate = useNavigate()
   const actions = [
-    { label: 'New Order',    icon: ShoppingCart, color: 'bg-blue-600   hover:bg-blue-700',   to: '/orders' },
-    { label: 'New Invoice',  icon: Receipt,      color: 'bg-purple-600 hover:bg-purple-700', to: '/invoices' },
-    { label: 'New Run',      icon: Truck,        color: 'bg-teal-600   hover:bg-teal-700',   to: '/drivers' },
-    { label: 'Receive Stock',icon: Package,      color: 'bg-green-600  hover:bg-green-700',  to: '/receiving' },
-    { label: 'New Return',   icon: RotateCcw,    color: 'bg-orange-500 hover:bg-orange-600', to: '/returns' },
-    { label: 'Stock Take',   icon: FileText,     color: 'bg-gray-600   hover:bg-gray-700',   to: '/stock-take' },
+    { label: 'New Order',     icon: ShoppingCart,  color: 'from-blue-500 to-blue-600',   to: '/orders',        ring: 'ring-blue-200' },
+    { label: 'New Invoice',   icon: Receipt,       color: 'from-violet-500 to-violet-600', to: '/invoices',     ring: 'ring-violet-200' },
+    { label: 'Receive Stock', icon: Package,       color: 'from-emerald-500 to-emerald-600', to: '/receiving',  ring: 'ring-emerald-200' },
+    { label: 'Dispatch',      icon: SendHorizonal, color: 'from-teal-500 to-teal-600',    to: '/dispatch',      ring: 'ring-teal-200' },
+    { label: 'New Return',    icon: RotateCcw,     color: 'from-orange-500 to-orange-600', to: '/returns',      ring: 'ring-orange-200' },
+    { label: 'Stock Take',    icon: ClipboardList, color: 'from-slate-500 to-slate-600',  to: '/stock-take',    ring: 'ring-slate-200' },
+  ]
+  return (
+    <div className="card !p-0 overflow-hidden">
+      <div className="px-5 py-4 border-b border-gray-100 bg-gradient-to-r from-slate-50 to-white flex items-center gap-2">
+        <div className="p-1.5 bg-blue-100 rounded-lg">
+          <Sparkles size={15} className="text-blue-600" />
+        </div>
+        <div>
+          <h3 className="font-bold text-gray-900 text-sm">Quick Actions</h3>
+          <p className="text-[11px] text-gray-400">Start any task in one click</p>
+        </div>
+      </div>
+      <div className="p-4 grid grid-cols-2 gap-2.5">
+        {actions.map(({ label, icon: Icon, color, to, ring }) => (
+          <button key={label} onClick={() => navigate(to)}
+            className={`group relative overflow-hidden bg-gradient-to-br ${color} text-white rounded-xl py-3.5 px-3 flex flex-col items-center gap-2 transition-all hover:shadow-lg hover:scale-[1.02] active:scale-[0.98] ring-2 ring-transparent hover:${ring}`}>
+            <div className="absolute inset-0 bg-white/0 group-hover:bg-white/10 transition-all" />
+            <Icon size={20} className="relative z-10" />
+            <span className="relative z-10 text-[11px] font-bold leading-tight text-center">{label}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ── Today's Snapshot ──────────────────────────────────────────
+function TodaySnapshot({ summary }) {
+  const items = [
+    { label: 'Dispatched Today',  value: summary.today_dispatched,           icon: Truck,        color: 'text-teal-600', bg: 'bg-teal-50',   to: '/dispatch' },
+    { label: 'Ready to Dispatch', value: summary.orders_ready_to_dispatch ?? 0, icon: CheckCircle, color: summary.orders_ready_to_dispatch > 0 ? 'text-green-700' : 'text-gray-400', bg: summary.orders_ready_to_dispatch > 0 ? 'bg-green-50' : 'bg-gray-50', to: '/orders' },
+    { label: 'Purchase Orders',   value: summary.pending_pos,                icon: FileText,     color: 'text-blue-600', bg: 'bg-blue-50',   to: '/purchase-orders' },
+    { label: 'Pending Returns',   value: summary.pending_returns,            icon: RotateCcw,    color: summary.pending_returns > 0 ? 'text-orange-600' : 'text-gray-400', bg: summary.pending_returns > 0 ? 'bg-orange-50' : 'bg-gray-50', to: '/returns' },
+    { label: 'Slow Movers',       value: summary.slow_movers_count,          icon: Archive,      color: 'text-gray-500', bg: 'bg-gray-50',   to: '/inventory' },
+    { label: 'Drivers On Route',  value: summary.drivers_on_route,           icon: Activity,     color: 'text-indigo-600', bg: 'bg-indigo-50', to: '/drivers' },
   ]
   return (
     <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
-      {actions.map(({ label, icon: Icon, color, to }) => (
-        <button
-          key={label}
-          onClick={() => navigate(to)}
-          className={`${color} text-white rounded-xl py-3 px-2 flex flex-col items-center gap-1.5 transition-colors`}
-        >
-          <Icon size={18} />
-          <span className="text-xs font-medium leading-tight text-center">{label}</span>
-        </button>
-      ))}
-    </div>
-  )
-}
-
-// ── Delivery Status Panel ─────────────────────────────────────
-function DeliveryPanel({ summary }) {
-  const total    = summary.runs_today
-  const done     = summary.runs_completed_today
-  const pct      = total > 0 ? Math.round((done / total) * 100) : 0
-
-  return (
-    <div className="card">
-      <h3 className="font-semibold text-gray-900 mb-4 flex items-center justify-between">
-        <span className="flex items-center gap-2">
-          <Truck size={16} className="text-blue-500" />
-          Today's Deliveries
-        </span>
-        <Link to="/drivers" className="text-xs text-blue-500 hover:underline">Manage →</Link>
-      </h3>
-      <div className="grid grid-cols-3 gap-3 mb-4">
-        <MiniStatCard label="Runs Today"    value={total} color="text-gray-900" />
-        <MiniStatCard label="Completed"     value={done}  color="text-green-700" />
-        <MiniStatCard label="On Route"      value={summary.drivers_on_route} color="text-blue-700"
-          sub={`${summary.drivers_available} available`} />
-      </div>
-      {total > 0 && (
-        <div>
-          <div className="flex items-center justify-between text-xs text-gray-500 mb-1">
-            <span>Completion</span><span>{pct}%</span>
-          </div>
-          <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-            <div className="h-full bg-green-500 rounded-full transition-all" style={{ width: `${pct}%` }} />
-          </div>
-        </div>
-      )}
-      {total === 0 && (
-        <div className="flex items-center gap-2 text-sm text-gray-400">
-          <MapPin size={14} /> No delivery runs scheduled for today
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ── Invoice / Financial Panel ─────────────────────────────────
-function InvoicePanel({ summary }) {
-  return (
-    <div className="card">
-      <h3 className="font-semibold text-gray-900 mb-4 flex items-center justify-between">
-        <span className="flex items-center gap-2">
-          <Receipt size={16} className="text-purple-500" />
-          Invoices & Revenue
-        </span>
-        <Link to="/invoices" className="text-xs text-blue-500 hover:underline">View all →</Link>
-      </h3>
-      <div className="grid grid-cols-2 gap-4">
-        <div className="bg-purple-50 rounded-xl p-3 text-center">
-          <div className="text-xl font-bold text-purple-700">
-            ${summary.invoice_outstanding?.toLocaleString('en', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-          </div>
-          <div className="text-xs text-purple-600 mt-0.5">Outstanding</div>
-        </div>
-        <div className="bg-green-50 rounded-xl p-3 text-center">
-          <div className="text-xl font-bold text-green-700">
-            ${summary.invoiced_this_month?.toLocaleString('en', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-          </div>
-          <div className="text-xs text-green-600 mt-0.5">Invoiced This Month</div>
-        </div>
-      </div>
-      {summary.invoices_overdue > 0 && (
-        <div className="mt-3 flex items-center gap-2 text-sm text-red-600 bg-red-50 rounded-lg p-2.5">
-          <AlertTriangle size={14} />
-          <span>{summary.invoices_overdue} overdue invoice{summary.invoices_overdue > 1 ? 's' : ''} need attention</span>
-          <Link to="/invoices" className="ml-auto text-xs underline">Review →</Link>
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ── Operations Status Row ─────────────────────────────────────
-function OpsStatusRow({ summary }) {
-  const items = [
-    {
-      label: 'Pending Returns',
-      value: summary.pending_returns,
-      color: summary.pending_returns > 0 ? 'text-orange-600' : 'text-gray-400',
-      bg: summary.pending_returns > 0 ? 'bg-orange-50 border-orange-200' : 'bg-gray-50 border-gray-200',
-      icon: RotateCcw,
-      to: '/returns',
-    },
-    {
-      label: 'Purchase Orders',
-      value: summary.pending_pos,
-      color: summary.pending_pos > 0 ? 'text-blue-600' : 'text-gray-400',
-      bg: summary.pending_pos > 0 ? 'bg-blue-50 border-blue-200' : 'bg-gray-50 border-gray-200',
-      icon: FileText,
-      to: '/purchase-orders',
-    },
-    {
-      label: 'Slow Movers',
-      value: summary.slow_movers_count,
-      color: summary.slow_movers_count > 0 ? 'text-gray-600' : 'text-gray-400',
-      bg: 'bg-gray-50 border-gray-200',
-      icon: Archive,
-      to: '/inventory',
-    },
-    {
-      label: 'Today Dispatched',
-      value: summary.today_dispatched,
-      color: 'text-teal-700',
-      bg: 'bg-teal-50 border-teal-200',
-      icon: Truck,
-      to: '/dispatch',
-    },
-    {
-      label: 'Ready to Dispatch',
-      value: summary.orders_ready_to_dispatch ?? 0,
-      color: summary.orders_ready_to_dispatch > 0 ? 'text-green-700' : 'text-gray-400',
-      bg: summary.orders_ready_to_dispatch > 0 ? 'bg-green-50 border-green-300' : 'bg-gray-50 border-gray-200',
-      icon: CheckCircle,
-      to: '/orders',
-    },
-    {
-      label: 'Awaiting Invoice',
-      value: summary.orders_awaiting_invoice ?? 0,
-      color: summary.orders_awaiting_invoice > 0 ? 'text-purple-700' : 'text-gray-400',
-      bg: summary.orders_awaiting_invoice > 0 ? 'bg-purple-50 border-purple-300' : 'bg-gray-50 border-gray-200',
-      icon: Receipt,
-      to: '/invoices',
-    },
-  ]
-  return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-      {items.map(({ label, value, color, bg, icon: Icon, to }) => (
+      {items.map(({ label, value, icon: Icon, color, bg, to }) => (
         <Link key={label} to={to}
-          className={`border rounded-xl p-3 flex items-center gap-3 hover:shadow-sm transition-shadow ${bg}`}>
-          <Icon size={18} className={color} />
-          <div>
-            <div className={`text-xl font-bold leading-none ${color}`}>{value}</div>
-            <div className="text-xs text-gray-500 mt-0.5">{label}</div>
-          </div>
+          className={`${bg} border border-white rounded-2xl p-3 flex flex-col items-center gap-1.5 hover:shadow-md transition-all hover:scale-[1.02] group`}>
+          <Icon size={18} className={`${color} group-hover:scale-110 transition-transform`} />
+          <div className={`text-xl font-bold leading-none ${color}`}>{value ?? 0}</div>
+          <div className="text-[10px] text-gray-500 font-medium text-center leading-tight">{label}</div>
         </Link>
       ))}
     </div>
   )
 }
 
-// ── Welcome Hero Card ─────────────────────────────────────────
-function WelcomeCard({ user, summary, onRefresh, refreshing }) {
-  const hour = new Date().getHours()
-  const greeting = hour < 5 ? 'Good night' : hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
-  const name = user?.full_name?.split(' ')[0] || user?.username || ''
-  const date = new Date().toLocaleDateString('en', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
-
-  const hero = [
-    {
-      label: 'Total SKUs',
-      value: summary?.total_skus ?? '—',
-      icon: Boxes,
-      sub: `${(summary?.total_cases_in_stock ?? 0).toLocaleString()} cases`,
-    },
-    {
-      label: 'Pending Orders',
-      value: summary?.pending_orders ?? '—',
-      icon: ShoppingCart,
-      sub: summary?.overdue_orders > 0 ? `${summary.overdue_orders} overdue` : 'all on time',
-      warn: summary?.overdue_orders > 0,
-    },
-    {
-      label: 'Monthly Revenue',
-      value: `$${((summary?.invoiced_this_month ?? 0)).toLocaleString('en', { maximumFractionDigits: 0 })}`,
-      icon: DollarSign,
-      sub: `$${((summary?.invoice_outstanding ?? 0)).toLocaleString('en', { maximumFractionDigits: 0 })} outstanding`,
-    },
-    {
-      label: 'Cases Dispatched',
-      value: (summary?.dispatched_this_month ?? 0).toLocaleString(),
-      icon: Truck,
-      sub: 'this month',
-    },
-  ]
-
+// ── Top Sellers ───────────────────────────────────────────────
+function TopSellers({ items }) {
+  const max = Math.max(...(items.map(s => s.cases_dispatched_30d || 0)), 1)
   return (
-    <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-blue-600 via-blue-700 to-indigo-800 p-6 text-white shadow-lg">
-      {/* Decorative circles */}
-      <div className="pointer-events-none absolute -right-12 -top-12 h-52 w-52 rounded-full bg-white/5" />
-      <div className="pointer-events-none absolute -bottom-10 left-16 h-36 w-36 rounded-full bg-white/5" />
-      <div className="pointer-events-none absolute right-1/3 top-0 h-24 w-24 rounded-full bg-white/5" />
-
-      {/* Top row */}
-      <div className="relative flex items-start justify-between">
-        <div>
-          <div className="mb-2 flex items-center gap-2">
-            <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-green-400" />
-            <span className="text-xs font-semibold uppercase tracking-widest text-blue-200">Live Dashboard</span>
+    <div className="card !p-0 overflow-hidden h-full">
+      <div className="px-5 py-4 border-b border-gray-100 bg-gradient-to-r from-slate-50 to-white flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <div className="p-1.5 bg-green-100 rounded-lg">
+            <TrendingUp size={15} className="text-green-600" />
           </div>
-          <h2 className="text-2xl font-bold leading-tight">
-            {greeting}{name ? `, ${name}` : ''}!
-          </h2>
-          <p className="mt-1 text-sm text-blue-200">{date}</p>
+          <div>
+            <h3 className="font-bold text-gray-900 text-sm">Top Sellers</h3>
+            <p className="text-[11px] text-gray-400">Last 30 days by cases</p>
+          </div>
         </div>
-        <button
-          onClick={onRefresh}
-          disabled={refreshing}
-          className="flex items-center gap-2 rounded-xl bg-white/10 px-3 py-1.5 text-sm text-blue-100 transition-colors hover:bg-white/20 hover:text-white disabled:opacity-50"
-        >
-          <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
-          Refresh
-        </button>
+        <Link to="/reports" className="text-xs text-blue-500 hover:text-blue-700 font-medium flex items-center gap-1">
+          Full report <ChevronRight size={11} />
+        </Link>
       </div>
-
-      {/* Stats row */}
-      <div className="relative mt-5 grid grid-cols-2 gap-4 border-t border-white/20 pt-5 sm:grid-cols-4">
-        {hero.map(({ label, value, icon: Icon, sub, warn }) => (
-          <div key={label} className="flex items-start gap-3">
-            <div className="mt-0.5 rounded-lg bg-white/10 p-1.5 flex-shrink-0">
-              <Icon size={14} className={warn ? 'text-red-300' : 'text-blue-200'} />
-            </div>
-            <div>
-              <div className={`text-xl font-bold leading-none ${warn ? 'text-red-300' : 'text-white'}`}>{value}</div>
-              <div className="mt-0.5 text-xs text-blue-300">{label}</div>
-              <div className={`mt-0.5 text-[10px] ${warn ? 'text-red-300' : 'text-blue-400'}`}>{sub}</div>
+      <div className="p-4 space-y-3">
+        {items.length === 0 ? (
+          <div className="py-8 text-center text-gray-300">
+            <BarChart2 size={32} className="mx-auto mb-2" />
+            <p className="text-sm text-gray-400">No dispatch data yet</p>
+          </div>
+        ) : items.slice(0, 6).map((s, i) => (
+          <div key={i} className="flex items-center gap-3">
+            <span className={`w-6 h-6 rounded-lg flex items-center justify-center text-xs font-bold flex-shrink-0 ${
+              i === 0 ? 'bg-yellow-100 text-yellow-700' : i === 1 ? 'bg-gray-100 text-gray-600' : i === 2 ? 'bg-orange-100 text-orange-600' : 'bg-gray-50 text-gray-400'
+            }`}>{i + 1}</span>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-sm font-medium text-gray-800 truncate max-w-[140px]">{s.product_name}</span>
+                <span className="text-sm font-bold text-gray-700 ml-2 flex-shrink-0">{s.cases_dispatched_30d}</span>
+              </div>
+              <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                <div className="h-full bg-gradient-to-r from-green-400 to-emerald-500 rounded-full transition-all"
+                  style={{ width: `${(s.cases_dispatched_30d / max) * 100}%` }} />
+              </div>
             </div>
           </div>
         ))}
@@ -338,286 +394,295 @@ function WelcomeCard({ user, summary, onRefresh, refreshing }) {
   )
 }
 
+// ── Activity Feed ─────────────────────────────────────────────
+const ACT_STYLE = {
+  dispatch:  { bg: 'bg-blue-100',  text: 'text-blue-600',  Icon: Truck },
+  receiving: { bg: 'bg-green-100', text: 'text-green-600', Icon: Package },
+  invoice:   { bg: 'bg-violet-100',text: 'text-violet-600',Icon: Receipt },
+  return:    { bg: 'bg-orange-100',text: 'text-orange-600',Icon: RotateCcw },
+}
+
+function ActivityFeed({ items }) {
+  return (
+    <div className="card !p-0 overflow-hidden h-full">
+      <div className="px-5 py-4 border-b border-gray-100 bg-gradient-to-r from-slate-50 to-white flex items-center gap-2">
+        <div className="p-1.5 bg-indigo-100 rounded-lg">
+          <Activity size={15} className="text-indigo-600" />
+        </div>
+        <div>
+          <h3 className="font-bold text-gray-900 text-sm">Recent Activity</h3>
+          <p className="text-[11px] text-gray-400">Live business events</p>
+        </div>
+      </div>
+      <div className="divide-y divide-gray-50">
+        {(!items || items.length === 0) ? (
+          <div className="py-12 text-center text-gray-300">
+            <Activity size={28} className="mx-auto mb-2" />
+            <p className="text-sm text-gray-400">No recent activity</p>
+          </div>
+        ) : items.slice(0, 8).map((item, i) => {
+          const s = ACT_STYLE[item.type] || ACT_STYLE['dispatch']
+          return (
+            <Link key={i} to={item.link || '/'} className="flex items-center gap-3 px-5 py-3 hover:bg-slate-50 transition-colors group">
+              <div className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 ${s.bg}`}>
+                <s.Icon size={14} className={s.text} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-gray-800 truncate">{item.title}</p>
+                <p className="text-xs text-gray-400 truncate">{item.detail}</p>
+              </div>
+              <div className="flex items-center gap-1 flex-shrink-0">
+                <span className="text-xs text-gray-300">{timeAgo(item.time)}</span>
+                <ChevronRight size={12} className="text-gray-200 group-hover:text-gray-400 transition-colors" />
+              </div>
+            </Link>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+// ── Finance & Delivery row ────────────────────────────────────
+function FinanceDeliveryRow({ summary }) {
+  const pct = summary.runs_today > 0 ? Math.round((summary.runs_completed_today / summary.runs_today) * 100) : 0
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      {/* Finance card */}
+      <div className="card">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <div className="p-1.5 bg-violet-100 rounded-lg"><DollarSign size={15} className="text-violet-600" /></div>
+            <h3 className="font-bold text-gray-900 text-sm">Finance Overview</h3>
+          </div>
+          <Link to="/invoices" className="text-xs text-blue-500 hover:text-blue-700 font-medium flex items-center gap-1">
+            All invoices <ChevronRight size={11} />
+          </Link>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="bg-gradient-to-br from-violet-50 to-purple-50 rounded-2xl p-4 text-center border border-violet-100">
+            <div className="text-2xl font-bold text-violet-700">{$$(summary.invoiced_this_month)}</div>
+            <div className="text-xs text-violet-500 mt-1 font-medium">Invoiced This Month</div>
+          </div>
+          <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-2xl p-4 text-center border border-amber-100">
+            <div className="text-2xl font-bold text-amber-700">{$$(summary.invoice_outstanding)}</div>
+            <div className="text-xs text-amber-500 mt-1 font-medium">Outstanding</div>
+          </div>
+        </div>
+        {summary.invoices_overdue > 0 && (
+          <Link to="/invoices" className="mt-3 flex items-center justify-between gap-2 text-sm bg-red-50 border border-red-200 rounded-xl px-3 py-2.5 group hover:bg-red-100 transition-colors">
+            <span className="flex items-center gap-2 text-red-700">
+              <AlertTriangle size={13} />
+              <span className="font-semibold">{summary.invoices_overdue} overdue invoice{summary.invoices_overdue > 1 ? 's' : ''}</span>
+            </span>
+            <span className="text-xs text-red-500 font-medium group-hover:text-red-700">Send reminders →</span>
+          </Link>
+        )}
+      </div>
+
+      {/* Delivery card */}
+      <div className="card">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <div className="p-1.5 bg-teal-100 rounded-lg"><Truck size={15} className="text-teal-600" /></div>
+            <h3 className="font-bold text-gray-900 text-sm">Today's Deliveries</h3>
+          </div>
+          <Link to="/drivers" className="text-xs text-blue-500 hover:text-blue-700 font-medium flex items-center gap-1">
+            Manage <ChevronRight size={11} />
+          </Link>
+        </div>
+        <div className="grid grid-cols-3 gap-3 mb-4">
+          {[
+            { label: 'Runs Today',   value: summary.runs_today,            color: 'text-gray-800',   bg: 'bg-gray-50' },
+            { label: 'Completed',    value: summary.runs_completed_today,  color: 'text-emerald-700',bg: 'bg-emerald-50' },
+            { label: 'On Route',     value: summary.drivers_on_route,      color: 'text-blue-700',   bg: 'bg-blue-50' },
+          ].map(({ label, value, color, bg }) => (
+            <div key={label} className={`${bg} rounded-xl p-3 text-center`}>
+              <div className={`text-xl font-bold leading-none ${color}`}>{value ?? 0}</div>
+              <div className="text-[11px] text-gray-500 mt-1">{label}</div>
+            </div>
+          ))}
+        </div>
+        {summary.runs_today > 0 ? (
+          <div>
+            <div className="flex justify-between text-xs text-gray-500 mb-1.5">
+              <span>Route completion</span>
+              <span className="font-semibold text-gray-700">{pct}%</span>
+            </div>
+            <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden">
+              <div className="h-full bg-gradient-to-r from-teal-400 to-emerald-500 rounded-full transition-all"
+                style={{ width: `${pct}%` }} />
+            </div>
+          </div>
+        ) : (
+          <p className="text-sm text-gray-400 text-center py-2">No delivery runs scheduled today</p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── Inventory Health strip ────────────────────────────────────
+function InventoryStrip({ summary, wh2Items, expiringItems }) {
+  return (
+    <div className="card">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <div className="p-1.5 bg-blue-100 rounded-lg"><Boxes size={15} className="text-blue-600" /></div>
+          <h3 className="font-bold text-gray-900 text-sm">Inventory Health</h3>
+        </div>
+        <Link to="/inventory" className="text-xs text-blue-500 hover:text-blue-700 font-medium flex items-center gap-1">
+          View all <ChevronRight size={11} />
+        </Link>
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {[
+          { label: 'Total SKUs',   value: summary.total_skus,          color: 'text-blue-700',   bg: 'from-blue-50 to-blue-50/50',   border: 'border-blue-100' },
+          { label: 'Stockouts',    value: summary.stockout_count,      color: summary.stockout_count > 0 ? 'text-red-700' : 'text-emerald-700', bg: summary.stockout_count > 0 ? 'from-red-50 to-red-50/50' : 'from-emerald-50 to-emerald-50/50', border: summary.stockout_count > 0 ? 'border-red-100' : 'border-emerald-100' },
+          { label: 'Low Stock',    value: summary.low_stock_count,     color: summary.low_stock_count > 0 ? 'text-amber-700' : 'text-emerald-700', bg: summary.low_stock_count > 0 ? 'from-amber-50 to-amber-50/50' : 'from-emerald-50 to-emerald-50/50', border: summary.low_stock_count > 0 ? 'border-amber-100' : 'border-emerald-100' },
+          { label: 'Expiring <30d', value: summary.expiring_critical,  color: summary.expiring_critical > 0 ? 'text-orange-700' : 'text-emerald-700', bg: summary.expiring_critical > 0 ? 'from-orange-50 to-orange-50/50' : 'from-emerald-50 to-emerald-50/50', border: summary.expiring_critical > 0 ? 'border-orange-100' : 'border-emerald-100' },
+        ].map(({ label, value, color, bg, border }) => (
+          <Link key={label} to="/inventory"
+            className={`bg-gradient-to-br ${bg} border ${border} rounded-2xl p-4 text-center hover:shadow-md transition-all hover:scale-[1.02]`}>
+            <div className={`text-2xl font-bold ${color} leading-none`}>{value ?? 0}</div>
+            <div className="text-xs text-gray-500 mt-1 font-medium">{label}</div>
+          </Link>
+        ))}
+      </div>
+
+      {/* Expiring items list */}
+      {expiringItems && expiringItems.length > 0 && (
+        <div className="mt-4 space-y-1.5">
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Expiring Soon</p>
+          {expiringItems.slice(0, 3).map((b, i) => (
+            <div key={i} className={`flex items-center justify-between p-2.5 rounded-xl ${b.days_to_expiry <= 30 ? 'bg-red-50 border border-red-100' : 'bg-amber-50 border border-amber-100'}`}>
+              <div className="min-w-0">
+                <span className="font-medium text-sm text-gray-800 truncate block">{b.product_name}</span>
+                <span className="text-xs text-gray-400">{b.sku_code} · {b.cases_remaining} cases</span>
+              </div>
+              <span className={`ml-3 flex-shrink-0 text-xs font-bold px-2.5 py-1 rounded-full ${b.days_to_expiry <= 30 ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
+                {b.days_to_expiry}d
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* WH2 transfer suggestions */}
+      {wh2Items && wh2Items.length > 0 && (
+        <div className="mt-4">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">WH2 → WH1 Transfer Needed</p>
+            <Link to="/transfers" className="text-xs text-blue-500 hover:text-blue-700 font-medium">Transfer →</Link>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {wh2Items.slice(0, 5).map((item, i) => (
+              <div key={i} className="flex items-center gap-1.5 bg-yellow-50 border border-yellow-200 rounded-xl px-2.5 py-1.5">
+                <span className="text-xs font-medium text-gray-700 truncate max-w-[100px]">{item.product_name}</span>
+                <span className="text-xs font-bold text-yellow-700 flex-shrink-0">{item.wh2_cases}</span>
+              </div>
+            ))}
+            {wh2Items.length > 5 && (
+              <span className="text-xs text-gray-400 self-center">+{wh2Items.length - 5} more</span>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Overdue Orders mini card ──────────────────────────────────
+function OverdueOrdersCard({ orders }) {
+  if (!orders || orders.length === 0) return null
+  return (
+    <div className="card border-l-4 border-l-red-400 !py-3">
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <AlertTriangle size={14} className="text-red-500" />
+          <span className="font-bold text-sm text-gray-900">Overdue Orders</span>
+          <span className="text-xs font-bold bg-red-100 text-red-700 px-1.5 py-0.5 rounded-full">{orders.length}</span>
+        </div>
+        <Link to="/orders" className="text-xs text-blue-500 hover:text-blue-700 font-medium flex items-center gap-1">
+          All orders <ChevronRight size={11} />
+        </Link>
+      </div>
+      <div className="space-y-1.5">
+        {orders.slice(0, 4).map((o, i) => (
+          <div key={i} className="flex items-center justify-between p-2 bg-red-50 rounded-xl">
+            <div>
+              <span className="font-semibold text-sm text-gray-800">{o.order_number}</span>
+              <span className="text-xs text-gray-500 ml-2">{o.store_name}</span>
+            </div>
+            <span className="text-xs font-bold text-red-700 bg-red-100 px-2 py-0.5 rounded-full">{o.days_pending}d overdue</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 // ── Main Dashboard ────────────────────────────────────────────
-export default function Dashboard({ lang }) {
-  const t = useT(lang)
+export default function Dashboard() {
   const { user } = useAuth()
-  const [data,      setData]      = useState(null)
-  const [loading,   setLoading]   = useState(true)
-  const [refreshing,setRefreshing] = useState(false)
+  const [data,       setData]       = useState(null)
+  const [loading,    setLoading]    = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
 
   const load = async (silent = false) => {
-    if (!silent) setLoading(true)
-    else setRefreshing(true)
-    try {
-      const r = await dashboardAPI.get()
-      setData(r.data)
-    } catch {}
-    setLoading(false)
-    setRefreshing(false)
+    if (!silent) setLoading(true); else setRefreshing(true)
+    try { const r = await dashboardAPI.get(); setData(r.data) } catch {}
+    setLoading(false); setRefreshing(false)
   }
 
   useEffect(() => { load() }, [])
 
   if (loading) return (
-    <div className="flex items-center justify-center h-64">
-      <RefreshCw size={24} className="animate-spin text-blue-400" />
+    <div className="flex flex-col items-center justify-center h-72 gap-4">
+      <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg animate-pulse">
+        <RefreshCw size={22} className="text-white animate-spin" />
+      </div>
+      <p className="text-sm text-gray-400 font-medium">Loading your dashboard…</p>
     </div>
   )
   if (!data) return null
 
   const { summary, expiring_soon, wh2_only_items, top_sellers, slow_movers, overdue_orders, activity_feed } = data
 
-  const expiryBadge = (days) => {
-    if (days < 0)   return <span className="badge-danger">Expired</span>
-    if (days <= 30) return <span className="badge-danger">{days}d</span>
-    if (days <= 60) return <span className="badge-warning">{days}d</span>
-    return <span className="badge-ok">{days}d</span>
-  }
-
-  const hasAlerts = summary.stockout_count > 0 || summary.expiring_critical > 0
-    || summary.overdue_orders > 0 || summary.invoices_overdue > 0
-    || summary.orders_ready_to_dispatch > 0 || summary.orders_awaiting_invoice > 0
-
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 pb-6">
 
-      {/* ── Welcome Hero ── */}
-      <WelcomeCard user={user} summary={summary} onRefresh={() => load(true)} refreshing={refreshing} />
+      {/* ① Hero */}
+      <HeroCard user={user} summary={summary} onRefresh={() => load(true)} refreshing={refreshing} />
 
-      {/* ── Alert banner ── */}
-      {hasAlerts && (
-        <div className="bg-red-50 border border-red-200 rounded-xl p-4 space-y-1">
-          <div className="flex items-center gap-2 font-semibold text-red-800 text-sm">
-            <AlertTriangle size={16} className="text-red-500" /> Action Required
-          </div>
-          <div className="flex flex-wrap gap-4 text-sm text-red-700 pl-6">
-            {summary.stockout_count > 0 && (
-              <Link to="/inventory" className="hover:underline">🔴 {summary.stockout_count} stockout{summary.stockout_count > 1 ? 's' : ''}</Link>
-            )}
-            {summary.expiring_critical > 0 && (
-              <Link to="/inventory" className="hover:underline">🟠 {summary.expiring_critical} batch{summary.expiring_critical > 1 ? 'es' : ''} expiring &lt;30d</Link>
-            )}
-            {summary.overdue_orders > 0 && (
-              <Link to="/orders" className="hover:underline">⏰ {summary.overdue_orders} overdue order{summary.overdue_orders > 1 ? 's' : ''}</Link>
-            )}
-            {summary.invoices_overdue > 0 && (
-              <Link to="/invoices" className="hover:underline">💳 {summary.invoices_overdue} overdue invoice{summary.invoices_overdue > 1 ? 's' : ''}</Link>
-            )}
-            {summary.orders_ready_to_dispatch > 0 && (
-              <Link to="/orders" className="hover:underline">✅ {summary.orders_ready_to_dispatch} order{summary.orders_ready_to_dispatch > 1 ? 's' : ''} ready to dispatch</Link>
-            )}
-            {summary.orders_awaiting_invoice > 0 && (
-              <Link to="/invoices" className="hover:underline">📄 {summary.orders_awaiting_invoice} order{summary.orders_awaiting_invoice > 1 ? 's' : ''} awaiting invoice</Link>
-            )}
-          </div>
+      {/* ② Today's Operations snapshot */}
+      <TodaySnapshot summary={summary} />
+
+      {/* ③ Main split: Attention + Quick Actions */}
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-5">
+        <div className="lg:col-span-3">
+          <AttentionPanel summary={summary} overdueOrders={overdue_orders} expiringItems={expiring_soon} />
         </div>
-      )}
-
-      {/* ── Quick Actions ── */}
-      <div className="card">
-        <h3 className="font-semibold text-gray-700 text-sm mb-3 flex items-center gap-2">
-          <Zap size={14} className="text-yellow-500" /> Quick Actions
-        </h3>
-        <QuickActions />
+        <div className="lg:col-span-2 flex flex-col gap-5">
+          <QuickActions />
+        </div>
       </div>
 
-      {/* ── Row 1: core inventory ── */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard label={t('totalSKUs')}    value={summary.total_skus}
-          sub={`${summary.total_cases_in_stock?.toLocaleString()} cases in stock`}
-          icon={Package} color="bg-blue-500" to="/skus" />
-        <StatCard label={t('stockouts')}    value={summary.stockout_count}
-          icon={TrendingDown} color={summary.stockout_count > 0 ? 'bg-red-500' : 'bg-green-500'}
-          to="/inventory" alert={summary.stockout_count > 0} />
-        <StatCard label={t('lowStock')}     value={summary.low_stock_count}
-          icon={AlertTriangle} color={summary.low_stock_count > 0 ? 'bg-yellow-500' : 'bg-green-500'}
-          to="/inventory" />
-        <StatCard label={t('pendingOrders')} value={summary.pending_orders}
-          sub={summary.overdue_orders > 0 ? `${summary.overdue_orders} overdue` : undefined}
-          icon={ShoppingCart} color={summary.overdue_orders > 0 ? 'bg-red-500' : 'bg-purple-500'}
-          to="/orders" alert={summary.overdue_orders > 0} />
-      </div>
+      {/* ④ Overdue orders (only shown when exist) */}
+      {overdue_orders?.length > 0 && <OverdueOrdersCard orders={overdue_orders} />}
 
-      {/* ── Row 2: expiry + throughput ── */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard label={t('expiringCritical')} value={summary.expiring_critical}
-          icon={Clock} color={summary.expiring_critical > 0 ? 'bg-orange-500' : 'bg-green-500'}
-          to="/inventory" alert={summary.expiring_critical > 0} />
-        <StatCard label={t('expiringWarning')}  value={summary.expiring_warning}
-          icon={Clock} color="bg-amber-400" to="/inventory" />
-        <StatCard label={t('receivedThisMonth')}   value={summary.received_this_month}
-          sub="cases received" icon={Package} color="bg-green-500" />
-        <StatCard label={t('dispatchedThisMonth')} value={summary.dispatched_this_month}
-          sub="cases dispatched" icon={ArrowRight} color="bg-teal-500" />
-      </div>
+      {/* ⑤ Finance + Delivery */}
+      <FinanceDeliveryRow summary={summary} />
 
-      {/* ── Ops status row ── */}
-      <OpsStatusRow summary={summary} />
-
-      {/* ── Delivery + Invoice row ── */}
+      {/* ⑥ Top Sellers + Activity Feed */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        <DeliveryPanel summary={summary} />
-        <InvoicePanel  summary={summary} />
+        <TopSellers items={top_sellers} />
+        <ActivityFeed items={activity_feed} />
       </div>
 
-      {/* ── Main 3-panel grid ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-
-        {/* Activity Feed */}
-        <div className="card lg:col-span-1 !p-0 overflow-hidden">
-          <div className="px-4 py-3 border-b flex items-center justify-between">
-            <h3 className="font-semibold text-gray-900 flex items-center gap-2">
-              <Activity size={15} className="text-gray-400" /> Recent Activity
-            </h3>
-          </div>
-          <ActivityFeed items={activity_feed} />
-        </div>
-
-        {/* Top Sellers */}
-        <div className="card">
-          <h3 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
-            <TrendingUp size={16} className="text-green-500" />
-            Top Sellers <span className="text-xs font-normal text-gray-400">(last 30 days)</span>
-          </h3>
-          {top_sellers.length === 0 ? (
-            <p className="text-sm text-gray-400">No dispatch data yet</p>
-          ) : (
-            <div className="space-y-2">
-              {top_sellers.map((s, i) => (
-                <div key={i} className="flex items-center gap-3">
-                  <span className="text-xs font-bold text-gray-300 w-4">{i + 1}</span>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium text-gray-800 truncate">{s.product_name}</div>
-                    <div className="text-xs text-gray-400">{s.sku_code} · {s.category}</div>
-                  </div>
-                  <div className="flex-shrink-0 text-right">
-                    <div className="text-sm font-bold text-green-600">{s.cases_dispatched_30d}</div>
-                    <div className="text-xs text-gray-400">cases</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Expiring Soon */}
-        <div className="card">
-          <h3 className="font-semibold text-gray-900 mb-4 flex items-center justify-between">
-            <span className="flex items-center gap-2">
-              <Clock size={16} className="text-orange-500" /> {t('expiringSoon')}
-            </span>
-            <Link to="/reports" className="text-xs text-blue-500 hover:underline">View all →</Link>
-          </h3>
-          {expiring_soon.length === 0 ? (
-            <div className="flex flex-col items-center py-6 text-gray-300">
-              <CheckCircle size={32} className="text-green-400 mb-2" />
-              <p className="text-sm text-gray-500">No items expiring within 60 days</p>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {expiring_soon.map((b, i) => (
-                <div key={i} className={`flex items-center justify-between p-2.5 rounded-lg ${b.days_to_expiry <= 30 ? 'bg-red-50' : 'bg-yellow-50'}`}>
-                  <div className="min-w-0">
-                    <div className="font-medium text-sm text-gray-800 truncate">{b.product_name}</div>
-                    <div className="text-xs text-gray-400">{b.sku_code} · {b.warehouse} · {b.cases_remaining} cases</div>
-                  </div>
-                  <div className="ml-3 flex-shrink-0">{expiryBadge(b.days_to_expiry)}</div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* ── Bottom row ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-
-        {/* Overdue Orders */}
-        <div className="card">
-          <h3 className="font-semibold text-gray-900 mb-4 flex items-center justify-between">
-            <span className="flex items-center gap-2">
-              <Zap size={16} className={overdue_orders.length > 0 ? 'text-red-500' : 'text-gray-400'} />
-              Overdue Orders
-            </span>
-            <Link to="/orders" className="text-xs text-blue-500 hover:underline">All orders →</Link>
-          </h3>
-          {overdue_orders.length === 0 ? (
-            <div className="flex items-center gap-2 text-green-600 text-sm">
-              <CheckCircle size={16} /> <span>All orders on time</span>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {overdue_orders.map((o, i) => (
-                <div key={i} className="flex items-center justify-between p-2.5 bg-red-50 rounded-lg">
-                  <div>
-                    <div className="font-medium text-sm text-gray-800">{o.order_number}</div>
-                    <div className="text-xs text-gray-500">{o.store_name}</div>
-                  </div>
-                  <span className="badge-danger ml-3">{o.days_pending}d</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Slow Movers */}
-        <div className="card">
-          <h3 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
-            <Archive size={16} className="text-gray-400" />
-            Slow Movers <span className="text-xs font-normal text-gray-400">(no movement)</span>
-          </h3>
-          {slow_movers.length === 0 ? (
-            <div className="flex flex-col items-center py-6">
-              <BarChart2 size={28} className="text-gray-300 mb-2" />
-              <p className="text-sm text-gray-400">All stocked items have movement</p>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {slow_movers.slice(0, 6).map((s, i) => (
-                <div key={i} className="flex items-center justify-between p-2 rounded-lg bg-gray-50">
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium text-gray-700 truncate">{s.product_name}</div>
-                    <div className="text-xs text-gray-400">{s.sku_code} · {s.category}</div>
-                  </div>
-                  <div className="ml-3 flex-shrink-0 text-right">
-                    <div className="text-sm font-bold text-gray-500">{s.total_cases}</div>
-                    <div className="text-xs text-gray-400">cases</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* WH2 items needing transfer */}
-        <div className="card">
-          <h3 className="font-semibold text-gray-900 mb-4 flex items-center justify-between">
-            <span className="flex items-center gap-2">
-              <AlertTriangle size={16} className={wh2_only_items.length > 0 ? 'text-yellow-500' : 'text-gray-400'} />
-              WH2 Only — Needs Transfer
-            </span>
-            <Link to="/transfers" className="text-xs text-blue-500 hover:underline">Transfers →</Link>
-          </h3>
-          {wh2_only_items.length === 0 ? (
-            <div className="flex items-center gap-2 text-green-600 text-sm">
-              <CheckCircle size={16} /> <span>All items accessible from WH1</span>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {wh2_only_items.slice(0, 6).map((item, i) => (
-                <div key={i} className="flex items-center justify-between p-2.5 bg-yellow-50 rounded-lg">
-                  <div>
-                    <div className="font-medium text-sm text-gray-800">{item.product_name}</div>
-                    <div className="text-xs text-gray-400">{item.sku_code}</div>
-                  </div>
-                  <span className="font-bold text-yellow-700">{item.wh2_cases} cases</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
+      {/* ⑦ Inventory Health (with expiry + WH2) */}
+      <InventoryStrip summary={summary} wh2Items={wh2_only_items} expiringItems={expiring_soon} />
 
     </div>
   )
