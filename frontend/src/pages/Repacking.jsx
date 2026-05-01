@@ -298,6 +298,8 @@ function BOMTab({ skus, refreshSkus, onGoToStock, onSaved }) {
   const [bulkWeightInput, setBulkWeightInput]         = useState('')  // bag weight for existing bulk SKU
   const [bulkWeightUomInput, setBulkWeightUomInput]   = useState('kg')
   const [creatingNewBulk, setCreatingNewBulk]         = useState(false) // "add a new bulk material" mode when hasBulkFlag
+  // Master-detail: which bulk material is selected in the left panel
+  const [selectedBulkId, setSelectedBulkId] = useState(null)
   // Inline bulk edit (pencil on card header)
   const [inlineBulkId,   setInlineBulkId]   = useState(null)
   const [inlineBulkWeight, setInlineBulkWeight] = useState('')
@@ -401,6 +403,15 @@ function BOMTab({ skus, refreshSkus, onGoToStock, onSaved }) {
     })
     return Object.values(map)
   }, [boms])
+
+  // Auto-select first item when list loads; if selected item disappears keep first
+  useEffect(() => {
+    if (grouped.length === 0) { setSelectedBulkId(null); return }
+    const still = grouped.find(g => String(g.bulk_id) === String(selectedBulkId))
+    if (!still) setSelectedBulkId(grouped[0].bulk_id)
+  }, [grouped]) // eslint-disable-line
+
+  const selectedGroup = grouped.find(g => String(g.bulk_id) === String(selectedBulkId)) || null
 
   const resetForm = () => {
     setForm(emptyForm)
@@ -872,141 +883,215 @@ function BOMTab({ skus, refreshSkus, onGoToStock, onSaved }) {
           <button onClick={() => openNew()} className="btn-primary mt-4 mx-auto">+ Add My First Product</button>
         </div>
       ) : (
-        <div className="space-y-4">
-          {grouped.map(group => (
-            <div key={group.bulk_id} className="card p-0 overflow-hidden border border-gray-200">
-              {/* Bulk material header */}
-              <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-200">
-                <div className="flex items-center gap-2.5">
-                  <span className="text-lg">📦</span>
-                  <div>
-                    <p className="font-semibold text-gray-800 text-sm">{group.bulk_name}</p>
-                    <p className="text-xs text-gray-400 font-mono">{group.bulk_code}</p>
-                  </div>
-                  <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium ml-2">
-                    {group.outputs.length} retail pack{group.outputs.length !== 1 ? 's' : ''}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  {onGoToStock && (
-                    <button
-                      type="button"
-                      onClick={() => onGoToStock(group.bulk_id)}
-                      className="text-xs text-green-700 hover:text-green-900 border border-green-300 hover:border-green-500 bg-green-50 hover:bg-green-100 px-2.5 py-1 rounded-lg transition-colors flex items-center gap-1 font-medium"
-                    >
-                      Log delivery →
-                    </button>
-                  )}
+        /* ── Master-detail split panel ── */
+        <div className="border border-gray-200 rounded-2xl overflow-hidden flex" style={{ minHeight: 440 }}>
+
+          {/* ── LEFT: scrollable list of all bulk materials ── */}
+          <div className="w-56 flex-shrink-0 border-r border-gray-200 bg-gray-50/70 flex flex-col">
+            <div className="px-3 py-2.5 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
+              <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">
+                {grouped.length} material{grouped.length !== 1 ? 's' : ''}
+              </span>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              {grouped.map(group => {
+                const sku = skus.find(s => String(s.id) === String(group.bulk_id))
+                const isSelected = String(selectedBulkId) === String(group.bulk_id)
+                return (
                   <button
+                    key={group.bulk_id}
                     type="button"
-                    onClick={() => {
-                      const sku = skus.find(s => String(s.id) === String(group.bulk_id))
-                      if (sku) openInlineBulkEdit(sku)
-                    }}
-                    className="text-xs text-gray-500 hover:text-gray-800 border border-gray-200 hover:border-gray-400 px-2 py-1 rounded-lg transition-colors flex items-center gap-1"
-                    title="Edit bulk material settings"
+                    onClick={() => { setSelectedBulkId(group.bulk_id); setInlineBulkId(null) }}
+                    className={`w-full text-left px-3 py-2.5 border-b border-gray-100 transition-all ${
+                      isSelected
+                        ? 'bg-white border-l-[3px] border-l-blue-500 shadow-sm'
+                        : 'hover:bg-white/80'
+                    }`}
                   >
-                    <Edit2 size={11} /> Edit
+                    <div className="flex items-center justify-between gap-1 mb-0.5">
+                      <span className={`font-semibold text-sm truncate leading-tight ${isSelected ? 'text-blue-700' : 'text-gray-800'}`}>
+                        {group.bulk_name}
+                      </span>
+                      <span className={`text-[11px] px-1.5 py-0.5 rounded-full font-bold flex-shrink-0 ${
+                        group.outputs.length > 0 ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'
+                      }`}>{group.outputs.length}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[11px] text-gray-400 font-mono truncate">{group.bulk_code}</span>
+                      {sku?.unit_weight && (
+                        <span className="text-[10px] bg-gray-100 text-gray-500 px-1 py-0.5 rounded font-mono flex-shrink-0">
+                          {sku.unit_weight}{sku.unit_weight_uom || 'g'}
+                        </span>
+                      )}
+                    </div>
                   </button>
-                  <button
-                    onClick={() => openNew(group.bulk_id)}
-                    className="text-xs text-blue-600 hover:text-blue-800 border border-blue-200 hover:border-blue-400 px-2.5 py-1 rounded-lg transition-colors flex items-center gap-1"
-                  >
-                    <Plus size={11} /> Add retail product
-                  </button>
+                )
+              })}
+            </div>
+            {/* Add material shortcut at list bottom */}
+            <button type="button" onClick={() => openNew()}
+              className="w-full px-3 py-2.5 text-left text-xs text-blue-600 hover:bg-blue-50 flex items-center gap-1.5 font-semibold border-t border-gray-200 transition-colors">
+              <Plus size={12} /> Add material
+            </button>
+          </div>
+
+          {/* ── RIGHT: detail panel for selected material ── */}
+          <div className="flex-1 min-w-0 bg-white flex flex-col overflow-hidden">
+            {!selectedGroup ? (
+              <div className="flex-1 flex items-center justify-center text-gray-300">
+                <div className="text-center">
+                  <Package size={28} className="mx-auto mb-2 opacity-40" />
+                  <p className="text-sm text-gray-400">Select a material from the list</p>
                 </div>
               </div>
-
-              {/* Inline bulk material edit */}
-              {inlineBulkId === group.bulk_id && (
-                <div className="px-4 py-3 bg-blue-50 border-b border-blue-100 flex flex-wrap items-end gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-blue-700 mb-1">Bag / sack size</label>
-                    <div className="flex gap-1.5">
-                      <input type="number" step="0.01" min="0.01" className="input w-24 text-sm"
-                        placeholder="e.g. 25"
-                        value={inlineBulkWeight} onChange={e => setInlineBulkWeight(e.target.value)} />
-                      <select className="input w-16 text-sm" value={inlineBulkUom} onChange={e => setInlineBulkUom(e.target.value)}>
-                        <option value="kg">kg</option>
-                        <option value="g">g</option>
-                        <option value="lbs">lbs</option>
-                        <option value="oz">oz</option>
-                      </select>
+            ) : (
+              <>
+                {/* Detail header */}
+                <div className="flex items-center justify-between px-5 py-3.5 bg-gray-50/50 border-b border-gray-100 flex-shrink-0">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <span className="text-xl flex-shrink-0">📦</span>
+                    <div className="min-w-0">
+                      <p className="font-bold text-gray-900 truncate">{selectedGroup.bulk_name}</p>
+                      <p className="text-xs text-gray-400 font-mono">{selectedGroup.bulk_code}</p>
                     </div>
+                    {(() => {
+                      const sku = skus.find(s => String(s.id) === String(selectedGroup.bulk_id))
+                      if (!sku) return null
+                      return (
+                        <div className="flex items-center gap-1.5 ml-1">
+                          {sku.unit_weight && (
+                            <span className="text-xs bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-full font-medium flex-shrink-0">
+                              {sku.unit_weight}{sku.unit_weight_uom || 'g'}/bag
+                            </span>
+                          )}
+                          {sku.cost_price && (
+                            <span className="text-xs bg-green-50 text-green-700 border border-green-200 px-2 py-0.5 rounded-full font-medium flex-shrink-0">
+                              ${sku.cost_price}/kg
+                            </span>
+                          )}
+                        </div>
+                      )
+                    })()}
                   </div>
-                  <div>
-                    <label className="block text-xs font-medium text-blue-700 mb-1">Cost per kg ($)</label>
-                    <input type="number" step="0.01" min="0" className="input w-28 text-sm"
-                      placeholder="e.g. 2.50"
-                      value={inlineBulkCost} onChange={e => setInlineBulkCost(e.target.value)} />
-                  </div>
-                  <div className="flex gap-2 pb-0.5">
-                    <button type="button" onClick={saveInlineBulkEdit} disabled={inlineBulkSaving}
-                      className="btn-primary text-xs px-3 py-1.5 flex items-center gap-1">
-                      {inlineBulkSaving ? <Loader2 size={11} className="animate-spin" /> : <Save size={11} />}
-                      Save
+                  <div className="flex items-center gap-1.5 flex-shrink-0 ml-3">
+                    {onGoToStock && (
+                      <button type="button" onClick={() => onGoToStock(selectedGroup.bulk_id)}
+                        className="text-xs text-green-700 border border-green-300 bg-green-50 hover:bg-green-100 px-2.5 py-1.5 rounded-lg font-medium flex items-center gap-1 transition-colors">
+                        Log delivery →
+                      </button>
+                    )}
+                    <button type="button"
+                      onClick={() => {
+                        const sku = skus.find(s => String(s.id) === String(selectedGroup.bulk_id))
+                        if (sku) openInlineBulkEdit(sku)
+                      }}
+                      className="text-xs text-gray-500 border border-gray-200 hover:border-gray-400 px-2 py-1.5 rounded-lg flex items-center gap-1 transition-colors">
+                      <Edit2 size={11} /> Edit
                     </button>
-                    <button type="button" onClick={() => setInlineBulkId(null)}
-                      className="btn-secondary text-xs px-3 py-1.5">Cancel</button>
+                    <button onClick={() => openNew(selectedGroup.bulk_id)}
+                      className="text-xs text-blue-600 border border-blue-200 hover:border-blue-400 bg-blue-50/50 hover:bg-blue-50 px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition-colors font-medium">
+                      <Plus size={11} /> Add retail pack
+                    </button>
                   </div>
                 </div>
-              )}
 
-              {/* Retail outputs table */}
-              <table className="w-full text-sm">
-                <thead className="bg-white text-xs text-gray-400 uppercase tracking-wide border-b border-gray-100">
-                  <tr>
-                    <th className="px-4 py-2 text-left pl-8">Retail product</th>
-                    <th className="px-4 py-2 text-right">Pack size</th>
-                    <th className="px-4 py-2 text-right">Raw material per case</th>
-                    <th className="px-4 py-2 text-right">Acceptable loss %</th>
-                    <th className="px-4 py-2 text-left">Notes</th>
-                    <th className="px-4 py-2 w-16" />
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-50">
-                  {group.outputs.map(b => {
-                    const sku = skus.find(s => s.id === b.output_sku_id)
-                    return (
-                      <tr key={b.id} className={`hover:bg-gray-50 transition-colors ${editBomId === b.id ? 'bg-blue-50' : ''}`}>
-                        <td className="px-4 py-3 pl-8">
-                          <div className="flex items-center gap-2">
-                            <span className="text-gray-400">↳</span>
-                            <div>
-                              <div className="font-medium text-gray-800">{b.output_sku_name}</div>
-                              <div className="text-xs text-gray-400 font-mono">{b.output_sku_code}</div>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 text-right text-gray-600">
-                          {sku?.case_size ? (
-                            <span>{sku.case_size} × {sku.unit_weight ? `${sku.unit_weight}${sku.unit_weight_uom || 'g'}` : sku.unit_label}</span>
-                          ) : '—'}
-                        </td>
-                        <td className="px-4 py-3 text-right font-mono font-semibold text-gray-800">
-                          {b.qty_per_unit} {b.unit}
-                        </td>
-                        <td className="px-4 py-3 text-right">
-                          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-                            b.waste_pct_allowed <= 2 ? 'bg-green-100 text-green-700' :
-                            b.waste_pct_allowed <= 5 ? 'bg-amber-100 text-amber-700' :
-                            'bg-red-100 text-red-700'
-                          }`}>{b.waste_pct_allowed}%</span>
-                        </td>
-                        <td className="px-4 py-3 text-gray-400 text-xs">{b.notes || '—'}</td>
-                        <td className="px-4 py-3">
-                          <div className="flex items-center justify-end gap-1">
-                            <button onClick={() => openEdit(b)} className="p-1.5 text-gray-400 hover:text-blue-500 rounded transition-colors" title="Edit"><Edit2 size={13} /></button>
-                            <button onClick={() => handleDelete(b.id)} className="p-1.5 text-gray-400 hover:text-red-500 rounded transition-colors" title="Remove"><Trash2 size={14} /></button>
-                          </div>
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
-          ))}
+                {/* Inline bulk edit */}
+                {inlineBulkId === selectedGroup.bulk_id && (
+                  <div className="px-5 py-3 bg-blue-50 border-b border-blue-100 flex flex-wrap items-end gap-3 flex-shrink-0">
+                    <div>
+                      <label className="block text-xs font-medium text-blue-700 mb-1">Bag / sack size</label>
+                      <div className="flex gap-1.5">
+                        <input type="number" step="0.01" min="0.01" className="input w-24 text-sm"
+                          placeholder="e.g. 25"
+                          value={inlineBulkWeight} onChange={e => setInlineBulkWeight(e.target.value)} />
+                        <select className="input w-16 text-sm" value={inlineBulkUom} onChange={e => setInlineBulkUom(e.target.value)}>
+                          <option value="kg">kg</option>
+                          <option value="g">g</option>
+                          <option value="lbs">lbs</option>
+                          <option value="oz">oz</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-blue-700 mb-1">Cost per kg ($)</label>
+                      <input type="number" step="0.01" min="0" className="input w-28 text-sm"
+                        placeholder="e.g. 2.50"
+                        value={inlineBulkCost} onChange={e => setInlineBulkCost(e.target.value)} />
+                    </div>
+                    <div className="flex gap-2 pb-0.5">
+                      <button type="button" onClick={saveInlineBulkEdit} disabled={inlineBulkSaving}
+                        className="btn-primary text-xs px-3 py-1.5 flex items-center gap-1">
+                        {inlineBulkSaving ? <Loader2 size={11} className="animate-spin" /> : <Save size={11} />} Save
+                      </button>
+                      <button type="button" onClick={() => setInlineBulkId(null)}
+                        className="btn-secondary text-xs px-3 py-1.5">Cancel</button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Retail packs table */}
+                <div className="flex-1 overflow-y-auto">
+                  {selectedGroup.outputs.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-14 text-gray-400">
+                      <Package size={28} className="mb-3 opacity-30" />
+                      <p className="text-sm font-medium">No retail packs yet</p>
+                      <p className="text-xs mt-1 text-gray-400">Click "+ Add retail pack" to define what you pack from this material</p>
+                    </div>
+                  ) : (
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-50/50 text-xs text-gray-400 uppercase tracking-wide border-b border-gray-100 sticky top-0">
+                        <tr>
+                          <th className="px-5 py-2.5 text-left">Retail product</th>
+                          <th className="px-4 py-2.5 text-right">Pack size</th>
+                          <th className="px-4 py-2.5 text-right">Raw material / case</th>
+                          <th className="px-4 py-2.5 text-right">Loss %</th>
+                          <th className="px-4 py-2.5 text-left">Notes</th>
+                          <th className="px-4 py-2.5 w-16" />
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-50">
+                        {selectedGroup.outputs.map(b => {
+                          const sku = skus.find(s => s.id === b.output_sku_id)
+                          return (
+                            <tr key={b.id} className={`hover:bg-gray-50/70 transition-colors ${editBomId === b.id ? 'bg-blue-50' : ''}`}>
+                              <td className="px-5 py-3">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-gray-300 text-xs">↳</span>
+                                  <div>
+                                    <div className="font-medium text-gray-800">{b.output_sku_name}</div>
+                                    <div className="text-xs text-gray-400 font-mono">{b.output_sku_code}</div>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="px-4 py-3 text-right text-gray-600">
+                                {sku?.case_size ? `${sku.case_size} × ${sku.unit_weight ? `${sku.unit_weight}${sku.unit_weight_uom || 'g'}` : sku.unit_label}` : '—'}
+                              </td>
+                              <td className="px-4 py-3 text-right font-mono font-semibold text-gray-800">
+                                {b.qty_per_unit} {b.unit}
+                              </td>
+                              <td className="px-4 py-3 text-right">
+                                <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                                  b.waste_pct_allowed <= 2 ? 'bg-green-100 text-green-700' :
+                                  b.waste_pct_allowed <= 5 ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'
+                                }`}>{b.waste_pct_allowed}%</span>
+                              </td>
+                              <td className="px-4 py-3 text-gray-400 text-xs">{b.notes || '—'}</td>
+                              <td className="px-4 py-3">
+                                <div className="flex items-center justify-end gap-1">
+                                  <button onClick={() => openEdit(b)} className="p-1.5 text-gray-300 hover:text-blue-500 rounded transition-colors" title="Edit"><Edit2 size={13} /></button>
+                                  <button onClick={() => handleDelete(b.id)} className="p-1.5 text-gray-300 hover:text-red-500 rounded transition-colors" title="Remove"><Trash2 size={14} /></button>
+                                </div>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
         </div>
       )}
     </div>
