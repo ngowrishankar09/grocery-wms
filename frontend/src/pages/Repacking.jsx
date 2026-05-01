@@ -280,7 +280,7 @@ function InlineWeightSetter({ sku, qtyMode, onApply }) {
 }
 
 // ── Tab 1: Bill of Materials (Bulk → Retail yields) ───────────
-function BOMTab({ skus, refreshSkus, onGoToStock }) {
+function BOMTab({ skus, refreshSkus, onGoToStock, onSaved }) {
   const [boms, setBoms]           = useState([])
   const [loading, setLoading]     = useState(true)
   const [error, setError]         = useState(null)
@@ -511,6 +511,7 @@ function BOMTab({ skus, refreshSkus, onGoToStock }) {
         }))
       }
       setShowForm(false); setEditBomId(null); resetForm(); load()
+      if (!editBomId) onSaved?.()
     } catch (err) { setFormError(err.response?.data?.detail || 'Failed to save') }
     finally { setSaving(false) }
   }
@@ -1012,8 +1013,229 @@ function BOMTab({ skus, refreshSkus, onGoToStock }) {
   )
 }
 
+// ── PO Quick Entry: spreadsheet-style bulk order form ────────
+function POQuickEntry({ bulkSkus, onCreated, onCancel }) {
+  const initRows = () => bulkSkus.map(sku => ({
+    sku_id:    sku.id,
+    sku_name:  sku.product_name,
+    sku_code:  sku.sku_code,
+    bag_wt_kg: sku.unit_weight ? toKg(sku.unit_weight, sku.unit_weight_uom || 'g') : null,
+    bag_label: sku.unit_weight ? `${sku.unit_weight}${sku.unit_weight_uom || 'g'}` : null,
+    cost_pr:   sku.cost_price != null ? String(sku.cost_price) : '',
+    qty:       '',
+    unit:      sku.unit_weight ? 'bags' : 'kg',
+  }))
+
+  const [rows, setRows]         = useState(initRows)
+  const [batchRef, setBatchRef] = useState('')
+  const [supplier, setSupplier] = useState('')
+  const [date, setDate]         = useState(new Date().toISOString().slice(0, 10))
+  const [filter, setFilter]     = useState('')
+  const [saving, setSaving]     = useState(false)
+  const [error, setError]       = useState(null)
+
+  const update = (skuId, key, val) =>
+    setRows(rs => rs.map(r => r.sku_id === skuId ? { ...r, [key]: val } : r))
+
+  const active  = rows.filter(r => parseFloat(r.qty) > 0)
+  const display = filter.trim()
+    ? rows.filter(r =>
+        r.sku_name.toLowerCase().includes(filter.toLowerCase()) ||
+        r.sku_code.toLowerCase().includes(filter.toLowerCase()))
+    : rows
+
+  const totalKg = active.reduce((s, r) => {
+    const qty = parseFloat(r.qty) || 0
+    return s + (r.unit === 'bags' && r.bag_wt_kg ? qty * r.bag_wt_kg : qty)
+  }, 0)
+  const totalCost = active.reduce((s, r) => {
+    const qty = parseFloat(r.qty) || 0
+    const kgT = r.unit === 'bags' && r.bag_wt_kg ? qty * r.bag_wt_kg : qty
+    return s + (r.cost_pr ? kgT * parseFloat(r.cost_pr) : 0)
+  }, 0)
+
+  const handleSubmit = async () => {
+    if (active.length === 0) { setError('Add qty for at least one item.'); return }
+    setError(null); setSaving(true)
+    const payload = {
+      batch_ref:        batchRef || null,
+      supplier:         supplier || null,
+      supplier_country: null,
+      currency:         'USD',
+      purchase_date:    date    || null,
+      exchange_rate:    1,
+      shared_freight:   0, shared_duty: 0, shared_overhead: 0, shared_other: 0,
+      notes:            null,
+      lines: active.map(r => {
+        const qty     = parseFloat(r.qty)
+        const kgTotal = r.unit === 'bags' && r.bag_wt_kg ? qty * r.bag_wt_kg : qty
+        return {
+          bulk_sku_id:        r.sku_id,
+          qty_kg:             kgTotal,
+          cost_material:      r.cost_pr && kgTotal > 0 ? kgTotal * parseFloat(r.cost_pr) : 0,
+          cost_packaging_mat: 0,
+          cost_labor:         0,
+        }
+      }),
+      cost_lines: [],
+    }
+    try {
+      await repackingAPI.createPurchase(payload)
+      onCreated(active.length, batchRef)
+    } catch (e) {
+      setError(e.response?.data?.detail || 'Failed to save')
+    } finally { setSaving(false) }
+  }
+
+  return (
+    <div className="card border border-indigo-200 bg-indigo-50/30 mb-6">
+      <div className="flex items-start justify-between mb-4">
+        <div>
+          <h3 className="font-semibold text-gray-800 flex items-center gap-2">
+            📋 Create Purchase Order
+          </h3>
+          <p className="text-xs text-gray-500 mt-0.5">
+            All your bulk materials are listed below — enter qty for items you're ordering, leave the rest blank
+          </p>
+        </div>
+        <button type="button" onClick={onCancel}
+          className="text-gray-400 hover:text-gray-600 p-1 rounded transition-colors">
+          <X size={16} />
+        </button>
+      </div>
+
+      {/* PO header */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4 p-3 bg-white border border-gray-200 rounded-xl">
+        <div>
+          <label className="block text-xs font-medium text-gray-700 mb-1">PO / Invoice Reference</label>
+          <input type="text" className="input w-full" placeholder="PO-2026-001"
+            value={batchRef} onChange={e => setBatchRef(e.target.value)} />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-700 mb-1">Supplier</label>
+          <input type="text" className="input w-full" placeholder="e.g. Kohinoor Foods"
+            value={supplier} onChange={e => setSupplier(e.target.value)} />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-700 mb-1">Date</label>
+          <input type="date" className="input w-full"
+            value={date} onChange={e => setDate(e.target.value)} />
+        </div>
+      </div>
+
+      {/* Search filter + live summary pill */}
+      <div className="flex items-center gap-2 mb-2">
+        <input type="text" className="input flex-1 text-sm"
+          placeholder="🔍 Filter by name or code…"
+          value={filter} onChange={e => setFilter(e.target.value)} />
+        {active.length > 0 && (
+          <span className="text-xs font-semibold text-indigo-700 bg-indigo-100 px-2.5 py-1.5 rounded-lg whitespace-nowrap">
+            {active.length} item{active.length !== 1 ? 's' : ''} · {totalKg.toFixed(0)} kg · ${totalCost.toFixed(0)}
+          </span>
+        )}
+      </div>
+
+      {/* Scrollable items table */}
+      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden"
+        style={{ maxHeight: 440, overflowY: 'auto' }}>
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50 text-xs text-gray-500 uppercase tracking-wide border-b border-gray-200 sticky top-0 z-10">
+            <tr>
+              <th className="px-3 py-2 text-left">Material</th>
+              <th className="px-3 py-2 text-center w-24">Bag size</th>
+              <th className="px-3 py-2 text-center w-28">Qty ordered</th>
+              <th className="px-3 py-2 text-center w-20">Unit</th>
+              <th className="px-3 py-2 text-right w-28">Cost / kg ($)</th>
+              <th className="px-3 py-2 text-right w-28">Est. total</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-50">
+            {display.length === 0 ? (
+              <tr><td colSpan={6} className="px-4 py-6 text-center text-sm text-gray-400">No items match "{filter}"</td></tr>
+            ) : display.map(row => {
+              const qty  = parseFloat(row.qty) || 0
+              const kgT  = row.unit === 'bags' && row.bag_wt_kg ? qty * row.bag_wt_kg : qty
+              const est  = row.cost_pr && kgT > 0 ? (kgT * parseFloat(row.cost_pr)).toFixed(2) : null
+              const isOn = qty > 0
+              return (
+                <tr key={row.sku_id}
+                  className={`transition-colors ${isOn ? 'bg-indigo-50' : 'hover:bg-gray-50'}`}>
+                  <td className="px-3 py-2.5">
+                    <div className="font-medium text-gray-800">{row.sku_name}</div>
+                    <div className="text-xs text-gray-400 font-mono">{row.sku_code}</div>
+                  </td>
+                  <td className="px-3 py-2.5 text-center">
+                    {row.bag_label
+                      ? <span className="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded font-mono">{row.bag_label}</span>
+                      : <span className="text-gray-300 text-xs">—</span>}
+                  </td>
+                  <td className="px-3 py-2.5">
+                    <input type="number" min="0" step="1"
+                      className={`input w-full text-center text-sm ${isOn ? 'border-indigo-400 ring-1 ring-indigo-200 bg-white' : ''}`}
+                      placeholder="0"
+                      value={row.qty}
+                      onChange={e => update(row.sku_id, 'qty', e.target.value)} />
+                  </td>
+                  <td className="px-3 py-2.5">
+                    <select className="input w-full text-sm" value={row.unit}
+                      onChange={e => update(row.sku_id, 'unit', e.target.value)}>
+                      {row.bag_wt_kg && <option value="bags">bags</option>}
+                      <option value="kg">kg</option>
+                      <option value="lbs">lbs</option>
+                    </select>
+                  </td>
+                  <td className="px-3 py-2.5">
+                    <input type="number" min="0" step="0.01"
+                      className="input w-full text-right text-sm"
+                      placeholder="—"
+                      value={row.cost_pr}
+                      onChange={e => update(row.sku_id, 'cost_pr', e.target.value)} />
+                  </td>
+                  <td className="px-3 py-2.5 text-right font-medium">
+                    {est
+                      ? <span className="text-green-700">${est}</span>
+                      : <span className="text-gray-300 text-xs">—</span>}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+          {active.length > 0 && (
+            <tfoot className="bg-gray-50 border-t border-gray-200 sticky bottom-0">
+              <tr>
+                <td colSpan={4} className="px-3 py-2 text-xs text-gray-500">
+                  <strong>{active.length}</strong> item{active.length !== 1 ? 's' : ''} selected
+                  · <strong>{totalKg.toFixed(1)} kg</strong> total
+                </td>
+                <td className="px-3 py-2 text-xs text-gray-500 text-right font-medium">Grand total:</td>
+                <td className="px-3 py-2 text-right font-bold text-gray-800">${totalCost.toFixed(2)}</td>
+              </tr>
+            </tfoot>
+          )}
+        </table>
+      </div>
+
+      {error && <p className="text-xs text-red-600 mt-2 flex items-center gap-1">
+        <AlertTriangle size={11} /> {error}
+      </p>}
+
+      <div className="flex items-center justify-between mt-4">
+        <button type="button" onClick={onCancel}
+          className="text-sm text-gray-500 hover:text-gray-700 px-4 py-2 rounded-lg border border-gray-200 bg-white transition-colors">
+          Cancel
+        </button>
+        <button type="button" disabled={active.length === 0 || saving} onClick={handleSubmit}
+          className="btn-primary flex items-center gap-2 disabled:opacity-40">
+          {saving ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
+          {saving ? 'Saving…' : `Save PO — ${active.length} item${active.length !== 1 ? 's' : ''}`}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // ── Tab 2: Purchases / Shipments ─────────────────────────────
-function PurchasesTab({ skus, onStartPacking, preFillSkuId }) {
+function PurchasesTab({ skus, onStartPacking, preFillSkuId, onSaved }) {
   const [purchases, setPurchases]   = useState([])
   const [loading, setLoading]       = useState(true)
   const [error, setError]           = useState(null)
@@ -1026,6 +1248,8 @@ function PurchasesTab({ skus, onStartPacking, preFillSkuId }) {
   const [deleting, setDeleting]     = useState(null)
   const [bomInputIds, setBomInputIds]   = useState([])            // input_sku_ids — catches non-flagged bulk SKUs
   const [bomsByInput, setBomsByInput]   = useState({})            // { input_sku_id: [bom,...] } for retail-pack hints
+  const [showPOEntry, setShowPOEntry]   = useState(false)         // spreadsheet PO quick-entry mode
+  const [savedBanner, setSavedBanner]   = useState(null)          // { count, ref } — shown after PO or delivery save
 
   const emptyCostLine = () => ({ description: '', amount: '', currency: 'USD', fx_rate_to_usd: '1', sort_order: 0 })
   const emptyLine = () => ({ bulk_sku_id: '', qty_kg: '', qty_uom: 'kg', bag_weight_kg: '', sku_cases: {}, cost_material: '', cost_packaging_mat: '', cost_labor: '' })
@@ -1141,14 +1365,24 @@ function PurchasesTab({ skus, onStartPacking, preFillSkuId }) {
     if (key === 'qty_kg' || key === 'bulk_sku_id') {
       const line = lines[i]
       const sku = skus.find(s => String(s.id) === String(line.bulk_sku_id))
+
+      // When a bulk SKU with a stored bag/sack size is selected, auto-switch to "bags"
+      // mode and pre-fill the bag weight — user just enters the count of bags received
+      if (key === 'bulk_sku_id' && sku?.unit_weight) {
+        const bagWtKg = toKg(sku.unit_weight, sku.unit_weight_uom || 'g')
+        if (bagWtKg) {
+          lines[i] = { ...lines[i], qty_uom: 'bags', bag_weight_kg: String(bagWtKg) }
+        }
+      }
+
       if (sku?.cost_price && !parseFloat(line.cost_material)) {
         const qty = parseFloat(line.qty_kg) || 0
-        const uom = line.qty_uom || 'kg'
+        const uom = lines[i].qty_uom || 'kg'
         let kg = qty
         if (uom === 'g')    kg = qty / 1000
         else if (uom === 'lbs') kg = qty * 0.453592
         else if (uom === 'oz')  kg = qty * 0.0283495
-        else if (uom === 'bags') kg = qty * (parseFloat(line.bag_weight_kg) || 0)
+        else if (uom === 'bags') kg = qty * (parseFloat(lines[i].bag_weight_kg) || 0)
         if (kg > 0) lines[i] = { ...lines[i], cost_material: (kg * sku.cost_price).toFixed(2) }
       }
     }
@@ -1258,7 +1492,9 @@ function PurchasesTab({ skus, onStartPacking, preFillSkuId }) {
       } else {
         await repackingAPI.createPurchase(payload)
       }
+      const wasNew = !editId
       setShowForm(false); setEditId(null); setForm(emptyForm()); load()
+      if (wasNew) { onSaved?.(); setSavedBanner({ count: form.lines.filter(l => l.bulk_sku_id && l.qty_kg).length, ref: form.batch_ref }) }
     } catch (e) {
       setFormError(e.response?.data?.detail || 'Failed to save purchase')
     } finally { setSaving(false) }
@@ -1283,17 +1519,61 @@ function PurchasesTab({ skus, onStartPacking, preFillSkuId }) {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-start justify-between mb-4">
         <div>
-          <h2 className="text-lg font-semibold text-gray-800">Stock Received</h2>
+          <h2 className="text-lg font-semibold text-gray-800">Purchase Orders &amp; Stock Received</h2>
           <p className="text-sm text-gray-500 mt-0.5">
-            Every time bulk material arrives from your supplier, log it here. Include what it cost — material, freight, duty, anything. The system calculates your exact cost per kg.
+            Create a PO to order from multiple suppliers at once, or record a one-off delivery. Every record tracks cost per kg automatically.
           </p>
         </div>
-        <button onClick={openNew} className="btn-primary flex items-center gap-1.5">
-          <Plus size={15} /> Record a Delivery
-        </button>
+        <div className="flex items-center gap-2 flex-shrink-0 ml-4">
+          <button
+            onClick={() => { setShowPOEntry(true); setShowForm(false); setSavedBanner(null) }}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl border-2 border-indigo-300 bg-indigo-50 text-indigo-700 text-sm font-semibold hover:bg-indigo-100 transition-colors">
+            📋 Create PO
+          </button>
+          <button onClick={() => { openNew(); setShowPOEntry(false); setSavedBanner(null) }} className="btn-primary flex items-center gap-1.5">
+            <Plus size={15} /> Quick Entry
+          </button>
+        </div>
       </div>
+
+      {/* ── Saved banner — shown after PO or delivery is recorded ── */}
+      {savedBanner && (
+        <div className="mb-4 flex items-center justify-between bg-green-50 border border-green-300 rounded-xl px-4 py-3">
+          <p className="text-sm text-green-800 flex items-center gap-2">
+            <CheckCircle2 size={16} className="text-green-600" />
+            <span>
+              <strong>{savedBanner.ref ? `"${savedBanner.ref}"` : 'PO'} saved</strong>
+              {savedBanner.count > 0 && ` — ${savedBanner.count} item${savedBanner.count !== 1 ? 's' : ''} recorded`}.
+              Ready to start packing?
+            </span>
+          </p>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setSavedBanner(null)} className="text-xs text-gray-400 hover:text-gray-600">Dismiss</button>
+          </div>
+        </div>
+      )}
+
+      {/* ── PO Quick Entry spreadsheet ── */}
+      {showPOEntry && bulkSkus.length > 0 && (
+        <POQuickEntry
+          bulkSkus={bulkSkus}
+          onCreated={(count, ref) => {
+            setShowPOEntry(false)
+            load()
+            onSaved?.()
+            setSavedBanner({ count, ref })
+          }}
+          onCancel={() => setShowPOEntry(false)}
+        />
+      )}
+      {showPOEntry && bulkSkus.length === 0 && (
+        <div className="card mb-4 border border-amber-200 bg-amber-50 text-sm text-amber-800 flex items-start gap-2 p-4">
+          <AlertTriangle size={15} className="mt-0.5 flex-shrink-0" />
+          <span>No bulk materials set up yet. Complete <strong>Step 1 — My Products</strong> first to define your bulk materials, then come back here to create a PO.</span>
+        </div>
+      )}
 
       {showForm && (
         <div className="card mb-6 border border-green-200 bg-green-50">
@@ -3506,11 +3786,11 @@ export default function Repacking() {
       done:  bomCount > 0,
     },
     {
-      label: 'Stock Received',
-      stat:  purchaseCount > 0 ? `${purchaseCount} batch${purchaseCount !== 1 ? 'es' : ''} recorded` : 'No deliveries yet',
+      label: 'Purchase Orders',
+      stat:  purchaseCount > 0 ? `${purchaseCount} PO${purchaseCount !== 1 ? 's' : ''} recorded` : 'No orders yet',
       hint:  purchaseCount > 0
-        ? 'Log every delivery with weight and cost'
-        : bomCount > 0 ? '← Set up done. Now record your first delivery' : 'Set up My Products first',
+        ? 'Create POs or log individual deliveries with cost per kg'
+        : bomCount > 0 ? '← Ready! Create a PO with all your bulk items at once' : 'Set up My Products first',
       done:  purchaseCount > 0,
     },
     {
@@ -3558,34 +3838,48 @@ export default function Repacking() {
         </div>
       )}
 
-      {/* "Next step" nudge — shown when current step is done and next isn't active */}
+      {/* ── Auto-flow nudge banners — update immediately via onSaved callbacks ── */}
       {activeTab === 0 && bomCount > 0 && purchaseCount === 0 && (
-        <div className="mb-4 flex items-center justify-between bg-blue-50 border border-blue-200 rounded-xl px-4 py-3">
-          <p className="text-sm text-blue-800">
-            <strong>Step 1 done!</strong> Now log your first stock delivery.
-          </p>
-          <button onClick={() => handleTabChange(1)} className="text-sm font-semibold text-blue-600 hover:text-blue-800 flex items-center gap-1">
-            Go to Stock Received →
+        <div className="mb-4 flex items-center justify-between bg-blue-50 border-2 border-blue-300 rounded-xl px-4 py-3 shadow-sm">
+          <div className="flex items-center gap-2">
+            <span className="text-lg">✅</span>
+            <p className="text-sm text-blue-800">
+              <strong>Step 1 complete!</strong> Your products are set up. Next: create a Purchase Order for all your bulk materials.
+            </p>
+          </div>
+          <button onClick={() => handleTabChange(1)}
+            className="ml-4 flex-shrink-0 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 px-3 py-1.5 rounded-lg flex items-center gap-1 transition-colors shadow-sm">
+            Step 2: Create PO →
           </button>
         </div>
       )}
       {activeTab === 1 && purchaseCount > 0 && runCount === 0 && (
-        <div className="mb-4 flex items-center justify-between bg-blue-50 border border-blue-200 rounded-xl px-4 py-3">
-          <p className="text-sm text-blue-800">
-            <strong>Stock logged!</strong> You're ready to start a packing session.
-          </p>
-          <button onClick={() => handleTabChange(2)} className="text-sm font-semibold text-blue-600 hover:text-blue-800 flex items-center gap-1">
-            Start Packing →
+        <div className="mb-4 flex items-center justify-between bg-blue-50 border-2 border-blue-300 rounded-xl px-4 py-3 shadow-sm">
+          <div className="flex items-center gap-2">
+            <span className="text-lg">✅</span>
+            <p className="text-sm text-blue-800">
+              <strong>Step 2 complete!</strong> Stock recorded. Next: start a packing session to track production.
+            </p>
+          </div>
+          <button onClick={() => handleTabChange(2)}
+            className="ml-4 flex-shrink-0 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 px-3 py-1.5 rounded-lg flex items-center gap-1 transition-colors shadow-sm">
+            Step 3: Start Packing →
           </button>
         </div>
       )}
-      {activeTab === 2 && runCount > 0 && flaggedCount > 0 && (
-        <div className="mb-4 flex items-center justify-between bg-orange-50 border border-orange-200 rounded-xl px-4 py-3">
-          <p className="text-sm text-orange-800">
-            <strong>{flaggedCount} session{flaggedCount > 1 ? 's' : ''} flagged</strong> — review variance in the Audit Report.
-          </p>
-          <button onClick={() => handleTabChange(3)} className="text-sm font-semibold text-orange-600 hover:text-orange-800 flex items-center gap-1">
-            View Audit Report →
+      {activeTab === 2 && runCount > 0 && (
+        <div className="mb-4 flex items-center justify-between bg-green-50 border-2 border-green-300 rounded-xl px-4 py-3 shadow-sm">
+          <div className="flex items-center gap-2">
+            <span className="text-lg">{flaggedCount > 0 ? '⚠️' : '✅'}</span>
+            <p className="text-sm text-green-800">
+              {flaggedCount > 0
+                ? <span><strong>{flaggedCount} session{flaggedCount > 1 ? 's' : ''} flagged.</strong> Review variance in the Audit Report.</span>
+                : <span><strong>Packing sessions logged.</strong> Review efficiency and costs in the Audit Report.</span>}
+            </p>
+          </div>
+          <button onClick={() => handleTabChange(3)}
+            className={`ml-4 flex-shrink-0 text-sm font-semibold text-white px-3 py-1.5 rounded-lg flex items-center gap-1 transition-colors shadow-sm ${flaggedCount > 0 ? 'bg-orange-500 hover:bg-orange-600' : 'bg-green-600 hover:bg-green-700'}`}>
+            Step 4: Audit Report →
           </button>
         </div>
       )}
@@ -3594,8 +3888,14 @@ export default function Repacking() {
         <div className="flex justify-center py-16"><Loader2 className="animate-spin text-blue-500" size={28} /></div>
       ) : (
         <>
-          {activeTab === 0 && <BOMTab skus={skus} refreshSkus={refreshSkus} onGoToStock={skuId => { setStockPreFillSkuId(skuId); handleTabChange(1) }} />}
-          {activeTab === 1 && <PurchasesTab skus={skus} onStartPacking={handleStartPacking} preFillSkuId={stockPreFillSkuId} />}
+          {activeTab === 0 && <BOMTab skus={skus} refreshSkus={refreshSkus}
+            onGoToStock={skuId => { setStockPreFillSkuId(skuId); handleTabChange(1) }}
+            onSaved={() => setBomCount(c => c + 1)}
+          />}
+          {activeTab === 1 && <PurchasesTab skus={skus} onStartPacking={handleStartPacking}
+            preFillSkuId={stockPreFillSkuId}
+            onSaved={() => setPurchaseCount(c => c + 1)}
+          />}
           {activeTab === 2 && <RunsTab skus={skus} landedCosts={landedCosts} preFill={runPreFill} onPreFillConsumed={() => setRunPreFill(null)} />}
           {activeTab === 3 && <SummaryTab />}
         </>
