@@ -1,13 +1,37 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { Package, Eye, EyeOff, LogIn } from 'lucide-react'
+import { Package, Eye, EyeOff, LogIn, Wifi, WifiOff } from 'lucide-react'
+import api from '../api/client'
 
 export default function Login() {
   const { login, loading, error } = useAuth()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [showPw,   setShowPw]   = useState(false)
+
+  // Server warm-up state: 'warming' | 'ready' | 'slow'
+  const [serverState, setServerState] = useState('warming')
+
+  useEffect(() => {
+    // Ping the backend immediately on mount so Render wakes up
+    // while the user is still typing their credentials
+    const start = Date.now()
+    const timeout = setTimeout(() => setServerState('slow'), 4000)
+
+    api.get('/health')
+      .then(() => {
+        clearTimeout(timeout)
+        setServerState('ready')
+      })
+      .catch(() => {
+        // Even a 4xx means the server is awake — only a network error means it's still booting
+        clearTimeout(timeout)
+        setServerState('ready')
+      })
+
+    return () => clearTimeout(timeout)
+  }, [])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -89,6 +113,26 @@ export default function Login() {
               {loading ? 'Signing in…' : 'Sign In'}
             </button>
           </form>
+
+          {/* Server warm-up status */}
+          {serverState === 'slow' && !loading && (
+            <div className="mt-4 flex items-center gap-2.5 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5">
+              <svg className="animate-spin w-4 h-4 text-amber-500 flex-shrink-0" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+              </svg>
+              <div>
+                <p className="text-xs font-semibold text-amber-800">Waking up the server…</p>
+                <p className="text-[11px] text-amber-600 mt-0.5">Server was idle. Takes 30–60 s. You can sign in once it's ready.</p>
+              </div>
+            </div>
+          )}
+          {serverState === 'ready' && !loading && !error && (
+            <div className="mt-4 flex items-center gap-2 text-emerald-600">
+              <Wifi size={13} />
+              <span className="text-xs font-medium">Server ready</span>
+            </div>
+          )}
 
           <div className="mt-6 pt-5 border-t border-gray-100 text-center space-y-2">
             <p className="text-xs text-gray-400">Contact your administrator if you need access.</p>

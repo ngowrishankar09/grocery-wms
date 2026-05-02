@@ -623,6 +623,13 @@ app.mount("/static", StaticFiles(directory=str(pathlib.Path(__file__).parent / "
 def root():
     return {"message": "Grocery WMS API running", "docs": "/docs"}
 
+@app.get("/health")
+def health():
+    """Lightweight keepalive endpoint — no DB, no auth.
+    Called by the login page on mount to wake up the Render free-tier server
+    before the user finishes typing their credentials."""
+    return {"status": "ok"}
+
 @app.post("/admin/run-seed")
 def run_seed_endpoint():
     """Manually trigger seed_demo_data() and return counts + any error."""
