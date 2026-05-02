@@ -2668,6 +2668,10 @@ function RunsTab({ skus, landedCosts, preFill, onPreFillConsumed }) {
       setRunForm({ run_ref: '', bulk_sku_id: '', qty_start: '', started_by: '', notes: '', landed_cost_id: '', units_planned: '' })
       await loadRuns()
       handleSelectRun(res.data)
+      // Show stock warning if server returned one
+      if (res.data.stock_warning) {
+        setTimeout(() => alert('⚠️ Stock Warning:\n\n' + res.data.stock_warning), 300)
+      }
     } catch (e) {
       setRunFormError(e.response?.data?.detail || 'Failed to create run')
     } finally { setCreatingRun(false) }

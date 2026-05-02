@@ -7,7 +7,7 @@ import {
   Receipt, Truck, RotateCcw, FileText, Plus,
   Activity, DollarSign, ArrowUpRight, ArrowDownRight,
   Zap, ChevronRight, Boxes, Star, Sparkles,
-  SendHorizonal, ClipboardList, BarChart2,
+  SendHorizonal, ClipboardList, BarChart2, Layers,
 } from 'lucide-react'
 import { Link, useNavigate } from 'react-router-dom'
 
@@ -291,12 +291,13 @@ function AttentionPanel({ summary, overdueOrders, expiringItems }) {
 function QuickActions() {
   const navigate = useNavigate()
   const actions = [
-    { label: 'New Order',     icon: ShoppingCart,  color: 'from-blue-500 to-blue-600',   to: '/orders',        ring: 'ring-blue-200' },
-    { label: 'New Invoice',   icon: Receipt,       color: 'from-violet-500 to-violet-600', to: '/invoices',     ring: 'ring-violet-200' },
-    { label: 'Receive Stock', icon: Package,       color: 'from-emerald-500 to-emerald-600', to: '/receiving',  ring: 'ring-emerald-200' },
-    { label: 'Dispatch',      icon: SendHorizonal, color: 'from-teal-500 to-teal-600',    to: '/dispatch',      ring: 'ring-teal-200' },
-    { label: 'New Return',    icon: RotateCcw,     color: 'from-orange-500 to-orange-600', to: '/returns',      ring: 'ring-orange-200' },
-    { label: 'Stock Take',    icon: ClipboardList, color: 'from-slate-500 to-slate-600',  to: '/stock-take',    ring: 'ring-slate-200' },
+    { label: 'New Order',      icon: ShoppingCart,  color: 'from-blue-500 to-blue-600',     to: '/orders',      ring: 'ring-blue-200' },
+    { label: 'New Invoice',    icon: Receipt,       color: 'from-violet-500 to-violet-600', to: '/invoices',    ring: 'ring-violet-200' },
+    { label: 'Receive Stock',  icon: Package,       color: 'from-emerald-500 to-emerald-600', to: '/receiving', ring: 'ring-emerald-200' },
+    { label: 'Dispatch',       icon: SendHorizonal, color: 'from-teal-500 to-teal-600',     to: '/dispatch',    ring: 'ring-teal-200' },
+    { label: 'Start Packing',  icon: Layers,        color: 'from-purple-500 to-purple-600', to: '/repacking',   ring: 'ring-purple-200' },
+    { label: 'New Return',     icon: RotateCcw,     color: 'from-orange-500 to-orange-600', to: '/returns',     ring: 'ring-orange-200' },
+    { label: 'Stock Take',     icon: ClipboardList, color: 'from-slate-500 to-slate-600',   to: '/stock-take',  ring: 'ring-slate-200' },
   ]
   return (
     <div className="card !p-0 overflow-hidden">
@@ -326,15 +327,16 @@ function QuickActions() {
 // ── Today's Snapshot ──────────────────────────────────────────
 function TodaySnapshot({ summary }) {
   const items = [
-    { label: 'Dispatched Today',  value: summary.today_dispatched,           icon: Truck,        color: 'text-teal-600', bg: 'bg-teal-50',   to: '/dispatch' },
-    { label: 'Ready to Dispatch', value: summary.orders_ready_to_dispatch ?? 0, icon: CheckCircle, color: summary.orders_ready_to_dispatch > 0 ? 'text-green-700' : 'text-gray-400', bg: summary.orders_ready_to_dispatch > 0 ? 'bg-green-50' : 'bg-gray-50', to: '/orders' },
-    { label: 'Purchase Orders',   value: summary.pending_pos,                icon: FileText,     color: 'text-blue-600', bg: 'bg-blue-50',   to: '/purchase-orders' },
-    { label: 'Pending Returns',   value: summary.pending_returns,            icon: RotateCcw,    color: summary.pending_returns > 0 ? 'text-orange-600' : 'text-gray-400', bg: summary.pending_returns > 0 ? 'bg-orange-50' : 'bg-gray-50', to: '/returns' },
-    { label: 'Slow Movers',       value: summary.slow_movers_count,          icon: Archive,      color: 'text-gray-500', bg: 'bg-gray-50',   to: '/inventory' },
-    { label: 'Drivers On Route',  value: summary.drivers_on_route,           icon: Activity,     color: 'text-indigo-600', bg: 'bg-indigo-50', to: '/drivers' },
+    { label: 'Dispatched Today',  value: summary.today_dispatched,               icon: Truck,        color: 'text-teal-600',   bg: 'bg-teal-50',    to: '/dispatch' },
+    { label: 'Ready to Dispatch', value: summary.orders_ready_to_dispatch ?? 0, icon: CheckCircle,  color: summary.orders_ready_to_dispatch > 0 ? 'text-green-700' : 'text-gray-400', bg: summary.orders_ready_to_dispatch > 0 ? 'bg-green-50' : 'bg-gray-50', to: '/orders' },
+    { label: 'Open Packing',      value: summary.open_packing_runs ?? 0,         icon: Layers,       color: summary.open_packing_runs > 0 ? 'text-purple-600' : 'text-gray-400', bg: summary.open_packing_runs > 0 ? 'bg-purple-50' : 'bg-gray-50', to: '/repacking' },
+    { label: 'Purchase Orders',   value: summary.pending_pos,                    icon: FileText,     color: 'text-blue-600',   bg: 'bg-blue-50',    to: '/purchase-orders' },
+    { label: 'Pending Returns',   value: summary.pending_returns,                icon: RotateCcw,    color: summary.pending_returns > 0 ? 'text-orange-600' : 'text-gray-400', bg: summary.pending_returns > 0 ? 'bg-orange-50' : 'bg-gray-50', to: '/returns' },
+    { label: 'Slow Movers',       value: summary.slow_movers_count,              icon: Archive,      color: 'text-gray-500',   bg: 'bg-gray-50',    to: '/inventory' },
+    { label: 'Drivers On Route',  value: summary.drivers_on_route,               icon: Activity,     color: 'text-indigo-600', bg: 'bg-indigo-50',  to: '/drivers' },
   ]
   return (
-    <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+    <div className="grid grid-cols-3 sm:grid-cols-7 gap-2">
       {items.map(({ label, value, icon: Icon, color, bg, to }) => (
         <Link key={label} to={to}
           className={`${bg} border border-white rounded-2xl p-3 flex flex-col items-center gap-1.5 hover:shadow-md transition-all hover:scale-[1.02] group`}>

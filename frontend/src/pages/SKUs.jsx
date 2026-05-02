@@ -1,7 +1,8 @@
 import { useEffect, useState, useRef } from 'react'
 import { skuAPI, vendorAPI, settingsAPI, uploadAPI, labelAPI, inventoryAPI } from '../api/client'
 import { useT } from '../i18n/translations'
-import { Plus, Search, Edit2, Trash2, AlertTriangle, Check, X, SlidersHorizontal, Info, Upload, FileSpreadsheet, FileText, Image, Printer, Tag, MapPin } from 'lucide-react'
+import { Plus, Search, Edit2, Trash2, AlertTriangle, Check, X, SlidersHorizontal, Info, Upload, FileSpreadsheet, FileText, Image, Printer, Tag, MapPin, ExternalLink } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
 
 const API = axios.create({ baseURL: 'http://localhost:8000' })
@@ -540,6 +541,7 @@ const BACKEND = import.meta.env.VITE_API_URL ? import.meta.env.VITE_API_URL.repl
 
 // ── SKU Form Modal ──────────────────────────────────────────────
 function SKUFormModal({ form, editId, categories, vendors, bins, saving, onSet, onSubmit, onClose, onImageFileReady, bulkLinks = [], setBulkLinks, allSkus = [] }) {
+  const navigate = useNavigate()
   const casePreview = form.case_size && form.unit_label
     ? `1 case = ${form.case_size} ${form.unit_label}`
     : null
@@ -808,9 +810,19 @@ function SKUFormModal({ form, editId, categories, vendors, bins, saving, onSet, 
                         Link the retail bags/packs produced from this bulk material
                       </p>
                     </div>
-                    <span className="text-xs bg-blue-100 text-blue-700 font-bold px-2 py-0.5 rounded-full">
-                      {bulkLinks.length}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs bg-blue-100 text-blue-700 font-bold px-2 py-0.5 rounded-full">
+                        {bulkLinks.length}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => { onClose(); navigate('/repacking') }}
+                        className="flex items-center gap-1 text-[11px] text-blue-600 hover:text-blue-800 font-semibold"
+                        title="Open Repacking module"
+                      >
+                        <ExternalLink size={12} /> Repacking
+                      </button>
+                    </div>
                   </div>
 
                   {/* Linked pack rows */}

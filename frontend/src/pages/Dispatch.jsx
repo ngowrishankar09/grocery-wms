@@ -4,8 +4,9 @@ import api from '../api/client'
 import { useT } from '../i18n/translations'
 import {
   Plus, Trash2, CheckCircle, Camera, FileText,
-  X, AlertCircle, Send, Clock, ChevronRight, ImageIcon
+  X, AlertCircle, Send, Clock, ChevronRight, ImageIcon, Layers
 } from 'lucide-react'
+import { Link } from 'react-router-dom'
 
 const dispatchAPI = {
   create: (data) => api.post('/dispatch/', data),
@@ -190,7 +191,24 @@ function ResultModal({ result, onClose }) {
             </table>
           </div>
 
-          <button className="btn-primary w-full" onClick={onClose}>Done</button>
+          <div className="flex gap-2">
+            <button className="btn-primary flex-1" onClick={onClose}>Done</button>
+            <Link to="/inventory" onClick={onClose}
+              className="btn-secondary flex-1 flex items-center justify-center gap-1.5 text-sm">
+              View Inventory
+            </Link>
+          </div>
+
+          {/* Bulk stock note */}
+          <div className="flex items-start gap-2 bg-purple-50 border border-purple-100 rounded-xl px-3 py-2">
+            <Layers size={13} className="text-purple-500 flex-shrink-0 mt-0.5" />
+            <p className="text-[11px] text-purple-700 leading-tight">
+              Local Pack SKUs auto-deducted from linked bulk inventory.{' '}
+              <Link to="/repacking" onClick={onClose} className="underline font-semibold hover:text-purple-900">
+                Open Repacking
+              </Link>{' '}to manage packing runs.
+            </p>
+          </div>
         </div>
       </div>
     </div>

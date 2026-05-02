@@ -8,7 +8,7 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from database import get_db
 from models import (
     SKU, Inventory, Batch, Order, Transfer, MonthlyConsumption, DispatchRecordItem,
-    DispatchRecord, Invoice, Driver, DeliveryRun, CustomerReturn, PurchaseOrder
+    DispatchRecord, Invoice, Driver, DeliveryRun, CustomerReturn, PurchaseOrder, PackingRun
 )
 from security import get_current_user, get_company_id
 
@@ -216,6 +216,16 @@ def get_dashboard(
         DeliveryRun.company_id == company_id,
     ).count()
 
+    # ── Packing Runs ──
+    open_packing_runs = 0
+    try:
+        open_packing_runs = db.query(PackingRun).filter(
+            PackingRun.status == "open",
+            PackingRun.company_id == company_id,
+        ).count()
+    except Exception:
+        pass
+
     # ── Returns stats ──
     pending_returns = db.query(CustomerReturn).filter(
         CustomerReturn.status == "Pending",
@@ -325,6 +335,7 @@ def get_dashboard(
             "pending_pos": pending_pos,
             "orders_ready_to_dispatch": orders_ready_to_dispatch,
             "orders_awaiting_invoice": orders_awaiting_invoice,
+            "open_packing_runs": open_packing_runs,
         },
         "expiring_soon": [
             {

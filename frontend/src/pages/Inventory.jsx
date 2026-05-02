@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import { inventoryAPI, skuAPI, uploadAPI, receivingAPI, warehouseTaskAPI } from '../api/client'
 import api from '../api/client'
 import { useT } from '../i18n/translations'
-import { Search, Filter, MapPin, X, Check, Camera, Layers, Package, Lock, Unlock, AlertTriangle } from 'lucide-react'
+import { Search, Filter, MapPin, X, Check, Camera, Layers, Package, Lock, Unlock, AlertTriangle, ExternalLink } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import BarcodeScanner from '../components/BarcodeScanner'
 
 const API = api  // alias kept so existing call-sites work unchanged
@@ -469,7 +470,14 @@ export default function Inventory({ lang }) {
               ) : filtered.map(item => (
                 <tr key={item.sku_id} className="border-b border-gray-50 hover:bg-gray-50">
                   <td className="table-td">
-                    <div className="font-medium text-gray-900">{item.product_name}</div>
+                    <div className="font-medium text-gray-900 flex items-center gap-1.5">
+                      {item.product_name}
+                      {item.is_bulk_material && (
+                        <Link to="/repacking" className="inline-flex items-center gap-0.5 text-[10px] bg-purple-100 text-purple-700 hover:bg-purple-200 px-1.5 py-0.5 rounded font-semibold transition-colors" title="Open Repacking module">
+                          <ExternalLink size={9} /> Repacking
+                        </Link>
+                      )}
+                    </div>
                     {lang === 'es' && item.name_es && <div className="text-xs text-gray-400">{item.name_es}</div>}
                     <div className="text-xs text-gray-400">{item.sku_code} · {item.case_size} units/case</div>
                     {/* Mobile: show status badge + total inline */}

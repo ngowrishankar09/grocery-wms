@@ -9,6 +9,7 @@ Prefix: /repacking  Tags: ["Repacking"]
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
+from sqlalchemy import func as sqlfunc
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime, date
@@ -17,10 +18,101 @@ import httpx
 import sys, os
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from database import get_db
-from models import BillOfMaterial, PackingRun, PackingRunOutput, PackingRunBulk, SKU, LandedCost, PackingRunCost, LandedCostBatch, ShipmentCostLine, RunCostLine
+from models import BillOfMaterial, PackingRun, PackingRunOutput, PackingRunBulk, SKU, LandedCost, PackingRunCost, LandedCostBatch, ShipmentCostLine, RunCostLine, Inventory
 from security import get_current_user, get_company_id
 
 router = APIRouter(prefix="/repacking", tags=["Repacking"])
+
+
+# ── Inventory helpers ─────────────────────────────────────────────
+
+def _weight_to_kg(weight, uom: str) -> float:
+    """Convert a weight value + unit string to kg. Returns 0 if unable."""
+    try:
+        w = float(weight)
+    except (TypeError, ValueError):
+        return 0.0
+    if not uom:
+        return w
+    uom = uom.lower().strip()
+    if uom in ("kg", "kgs", "kilogram", "kilograms"):
+        return w
+    if uom in ("g", "gm", "gram", "grams"):
+        return w / 1000
+    if uom in ("lb", "lbs", "pound", "pounds"):
+        return w * 0.453592
+    if uom in ("oz", "ounce", "ounces"):
+        return w * 0.0283495
+    if uom in ("t", "ton", "tonne", "metric ton"):
+        return w * 1000
+    return w  # fallback: assume kg
+
+
+def _deduct_bulk_inventory(bulk_sku_id: int, kg_consumed: float, company_id: int, db: Session):
+    """
+    Deduct kg_consumed from a bulk SKU's inventory using the float-accumulator
+    pattern so fractional-sack usage accumulates correctly across multiple runs.
+    Drains WH1 first, then WH2.
+    """
+    if kg_consumed <= 0:
+        return
+
+    bulk_sku = db.query(SKU).filter(SKU.id == bulk_sku_id).first()
+    if not bulk_sku:
+        return
+
+    bulk_unit_kg = _weight_to_kg(bulk_sku.unit_weight, bulk_sku.unit_weight_uom)
+    if not bulk_unit_kg or bulk_unit_kg <= 0:
+        bulk_unit_kg = 1.0  # fallback: treat 1 case = 1 kg
+
+    remaining_kg = kg_consumed
+    for wh in ["WH1", "WH2"]:
+        if remaining_kg <= 0:
+            break
+        inv = db.query(Inventory).filter(
+            Inventory.sku_id     == bulk_sku_id,
+            Inventory.warehouse  == wh,
+            Inventory.company_id == company_id,
+        ).first()
+        if inv is None:
+            continue
+
+        # Accumulate kg consumed on this inventory row
+        inv.bulk_kg_consumed = (inv.bulk_kg_consumed or 0.0) + remaining_kg
+        remaining_kg = 0.0
+
+        # Convert to whole-sack deductions
+        full_sacks = int(inv.bulk_kg_consumed // bulk_unit_kg)
+        if full_sacks > 0:
+            actual_deduct     = min(full_sacks, max(0, inv.cases_on_hand))
+            inv.cases_on_hand = max(0, inv.cases_on_hand - actual_deduct)
+            inv.bulk_kg_consumed -= full_sacks * bulk_unit_kg  # keep remainder
+        inv.updated_at = datetime.utcnow()
+
+
+def _add_retail_inventory(sku_id: int, cases: int, company_id: int, db: Session):
+    """
+    Add produced retail cases to WH1 unrestricted inventory.
+    Creates the row if it does not exist yet.
+    """
+    if cases <= 0:
+        return
+    inv = db.query(Inventory).filter(
+        Inventory.sku_id     == sku_id,
+        Inventory.warehouse  == "WH1",
+        Inventory.company_id == company_id,
+        Inventory.stock_type == "unrestricted",
+    ).first()
+    if not inv:
+        inv = Inventory(
+            sku_id=sku_id, warehouse="WH1",
+            cases_on_hand=0, company_id=company_id,
+            stock_type="unrestricted",
+        )
+        db.add(inv)
+        db.flush()
+    inv.cases_on_hand = (inv.cases_on_hand or 0) + cases
+    inv.updated_at = datetime.utcnow()
 
 
 # ── Pydantic schemas ─────────────────────────────────────────────
@@ -584,8 +676,31 @@ def create_run(
     company_id: int     = Depends(get_company_id),
 ):
     # Validate bulk SKU
-    if not db.query(SKU).filter(SKU.id == body.bulk_sku_id).first():
+    bulk_sku = db.query(SKU).filter(SKU.id == body.bulk_sku_id).first()
+    if not bulk_sku:
         raise HTTPException(status_code=404, detail="Bulk SKU not found")
+
+    # ── Pre-run stock guard ──────────────────────────────────────
+    # Warn if qty_start (kg requested) exceeds available bulk inventory.
+    # We don't block, just return a warning in the response.
+    # Calculate available stock in kg from inventory rows.
+    if body.qty_start and body.qty_start > 0:
+        bulk_unit_kg = _weight_to_kg(bulk_sku.unit_weight, bulk_sku.unit_weight_uom) or 1.0
+        total_cases  = db.query(
+            sqlfunc.sum(Inventory.cases_on_hand)
+        ).filter(
+            Inventory.sku_id     == body.bulk_sku_id,
+            Inventory.company_id == company_id,
+        ).scalar() or 0
+        available_kg = total_cases * bulk_unit_kg
+        _stock_warning = (
+            f"qty_start ({body.qty_start} kg) exceeds available stock ({available_kg:.1f} kg). "
+            f"Check Inventory before starting this run."
+            if body.qty_start > available_kg else None
+        )
+    else:
+        _stock_warning = None
+    # ─────────────────────────────────────────────────────────────
 
     # Validate the linked landed cost if provided
     if body.landed_cost_id is not None:
@@ -615,7 +730,10 @@ def create_run(
     db.add(bulk_entry)
     db.commit()
     db.refresh(run)
-    return _fmt_run(run, db)
+    result = _fmt_run(run, db)
+    if _stock_warning:
+        result["stock_warning"] = _stock_warning
+    return result
 
 
 @router.get("/runs/{run_id}")
@@ -813,6 +931,20 @@ def close_run(
     run.status    = "closed"
     run.closed_at = datetime.utcnow()
 
+    # ── Step 4: Apply inventory movements ──────────────────────────
+    # Deduct actual bulk kg consumed from each bulk SKU's inventory
+    for b in bulk_entries:
+        kg_used = b.actual_used or 0.0
+        if kg_used > 0:
+            _deduct_bulk_inventory(b.bulk_sku_id, kg_used, company_id, db)
+
+    # Increment retail output SKU inventory (WH1) by cases produced
+    for o in outputs:
+        cases_produced = int(round(o.qty_packed or 0))
+        if cases_produced > 0:
+            _add_retail_inventory(o.sku_id, cases_produced, company_id, db)
+    # ───────────────────────────────────────────────────────────────
+
     db.commit()
     db.refresh(run)
     return _fmt_run(run, db)
@@ -843,8 +975,50 @@ def reopen_run(
     run.variance_pct       = None
     run.flag_high_variance = False
 
-    # Clear per-bulk-entry variance stats too
+    # ── Reverse inventory movements from the previous close ──────────
+    # We need to add back the bulk kg that was deducted, and remove
+    # the retail cases that were added, so the numbers are clean for re-close.
     bulk_entries = db.query(PackingRunBulk).filter(PackingRunBulk.run_id == run_id).all()
+    outputs      = db.query(PackingRunOutput).filter(PackingRunOutput.run_id == run_id).all()
+
+    for b in bulk_entries:
+        kg_to_restore = b.actual_used or 0.0
+        if kg_to_restore > 0:
+            # Reverse: add back the kg as whole sacks into WH1
+            bulk_sku = db.query(SKU).filter(SKU.id == b.bulk_sku_id).first()
+            if bulk_sku:
+                bulk_unit_kg = _weight_to_kg(bulk_sku.unit_weight, bulk_sku.unit_weight_uom) or 1.0
+                sacks_to_restore = int(round(kg_to_restore / bulk_unit_kg))
+                if sacks_to_restore > 0:
+                    inv = db.query(Inventory).filter(
+                        Inventory.sku_id     == b.bulk_sku_id,
+                        Inventory.warehouse  == "WH1",
+                        Inventory.company_id == company_id,
+                    ).first()
+                    if inv:
+                        inv.cases_on_hand  = (inv.cases_on_hand or 0) + sacks_to_restore
+                        inv.updated_at     = datetime.utcnow()
+                        # Subtract restored kg from the accumulator
+                        inv.bulk_kg_consumed = max(
+                            0.0,
+                            (inv.bulk_kg_consumed or 0.0) - kg_to_restore
+                        )
+
+    for o in outputs:
+        cases_to_remove = int(round(o.qty_packed or 0))
+        if cases_to_remove > 0:
+            inv = db.query(Inventory).filter(
+                Inventory.sku_id     == o.sku_id,
+                Inventory.warehouse  == "WH1",
+                Inventory.company_id == company_id,
+                Inventory.stock_type == "unrestricted",
+            ).first()
+            if inv:
+                inv.cases_on_hand = max(0, (inv.cases_on_hand or 0) - cases_to_remove)
+                inv.updated_at    = datetime.utcnow()
+    # ─────────────────────────────────────────────────────────────────
+
+    # Clear per-bulk-entry variance stats too
     for b in bulk_entries:
         b.qty_end      = None
         b.actual_used  = None
@@ -853,7 +1027,6 @@ def reopen_run(
         b.variance_pct = None
 
     # Clear per-output theoretical_kg
-    outputs = db.query(PackingRunOutput).filter(PackingRunOutput.run_id == run_id).all()
     for o in outputs:
         o.theoretical_kg = None
 
