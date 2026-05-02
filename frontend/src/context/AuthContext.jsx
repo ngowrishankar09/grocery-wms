@@ -97,6 +97,8 @@ export const ROLE_NAV = {
     '/', '/inventory', '/receiving', '/dispatch', '/dispatch-board',
     '/drivers', '/orders', '/transfers', '/picking', '/stock-take',
     '/bin-locations', '/returns',
+    '/repacking', '/warehouse-tasks', '/order-check',
+    '/traceability', '/supplier-asn',
   ],
   driver: ['/', '/drivers', '/dispatch-board'],
   readonly: ['/', '/inventory', '/reports', '/forecasting'],

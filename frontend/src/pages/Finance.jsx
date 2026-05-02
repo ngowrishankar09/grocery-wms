@@ -182,16 +182,17 @@ function JournalLedger() {
 // ── Main Page ─────────────────────────────────────────────────
 export default function Finance() {
   const [data,    setData]    = useState(null)
-  const [loading, setLoading] = useState(true)
-  const [months,  setMonths]  = useState(6)
-  const [tab,     setTab]     = useState('pl')   // pl | journal
+  const [loading,   setLoading]   = useState(true)
+  const [loadError, setLoadError] = useState(false)
+  const [months,    setMonths]    = useState(6)
+  const [tab,       setTab]       = useState('pl')   // pl | journal
 
   const load = async (m = months) => {
-    setLoading(true)
+    setLoading(true); setLoadError(false)
     try {
       const r = await financialAPI.pl(m)
       setData(r.data)
-    } catch {}
+    } catch { setLoadError(true) }
     setLoading(false)
   }
 
@@ -206,6 +207,14 @@ export default function Finance() {
 
   return (
     <div className="space-y-5 max-w-7xl mx-auto">
+      {/* Error banner */}
+      {loadError && (
+        <div className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+          <AlertTriangle size={16} className="text-red-500 flex-shrink-0" />
+          <p className="text-sm text-red-700 flex-1">Failed to load financial data.</p>
+          <button onClick={() => load(months)} className="text-sm font-semibold text-red-600 hover:text-red-800">Retry</button>
+        </div>
+      )}
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>

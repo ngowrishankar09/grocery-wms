@@ -1,11 +1,11 @@
 import { useEffect, useState, useRef } from 'react'
 import { skuAPI, vendorAPI, settingsAPI, uploadAPI, labelAPI, inventoryAPI } from '../api/client'
+import api from '../api/client'
 import { useT } from '../i18n/translations'
 import { Plus, Search, Edit2, Trash2, AlertTriangle, Check, X, SlidersHorizontal, Info, Upload, FileSpreadsheet, FileText, Image, Printer, Tag, MapPin, ExternalLink } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
-import axios from 'axios'
 
-const API = axios.create({ baseURL: 'http://localhost:8000' })
+const API = api  // alias — bin-location calls go through the auth-aware client
 
 // ── Reusable confirm dialog ─────────────────────────────────────
 function ConfirmDialog({ message, onConfirm, onCancel }) {

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { dashboardAPI } from '../api/client'
+import { dashboardAPI, invoiceAPI } from '../api/client'
 import { useAuth } from '../context/AuthContext'
 import {
   AlertTriangle, Package, TrendingDown, Clock, ShoppingCart,
@@ -473,13 +473,19 @@ function FinanceDeliveryRow({ summary }) {
           </div>
         </div>
         {summary.invoices_overdue > 0 && (
-          <Link to="/invoices" className="mt-3 flex items-center justify-between gap-2 text-sm bg-red-50 border border-red-200 rounded-xl px-3 py-2.5 group hover:bg-red-100 transition-colors">
+          <button
+            onClick={handleSendReminders}
+            disabled={sendingReminders}
+            className="mt-3 w-full flex items-center justify-between gap-2 text-sm bg-red-50 border border-red-200 rounded-xl px-3 py-2.5 group hover:bg-red-100 transition-colors disabled:opacity-60"
+          >
             <span className="flex items-center gap-2 text-red-700">
               <AlertTriangle size={13} />
               <span className="font-semibold">{summary.invoices_overdue} overdue invoice{summary.invoices_overdue > 1 ? 's' : ''}</span>
             </span>
-            <span className="text-xs text-red-500 font-medium group-hover:text-red-700">Send reminders →</span>
-          </Link>
+            <span className="text-xs text-red-500 font-medium group-hover:text-red-700">
+              {sendingReminders ? 'Sending…' : 'Send reminders →'}
+            </span>
+          </button>
         )}
       </div>
 
@@ -628,14 +634,29 @@ function OverdueOrdersCard({ orders }) {
 // ── Main Dashboard ────────────────────────────────────────────
 export default function Dashboard() {
   const { user } = useAuth()
+  const navigate = useNavigate()
   const [data,       setData]       = useState(null)
   const [loading,    setLoading]    = useState(true)
   const [refreshing, setRefreshing] = useState(false)
+  const [loadError,  setLoadError]  = useState(false)
+  const [sendingReminders, setSendingReminders] = useState(false)
 
   const load = async (silent = false) => {
     if (!silent) setLoading(true); else setRefreshing(true)
-    try { const r = await dashboardAPI.get(); setData(r.data) } catch {}
+    setLoadError(false)
+    try { const r = await dashboardAPI.get(); setData(r.data) }
+    catch { setLoadError(true) }
     setLoading(false); setRefreshing(false)
+  }
+
+  const handleSendReminders = async () => {
+    setSendingReminders(true)
+    try {
+      await invoiceAPI.sendReminders()
+      navigate('/invoices')
+    } catch {
+      navigate('/invoices')
+    } finally { setSendingReminders(false) }
   }
 
   useEffect(() => { load() }, [])
@@ -646,6 +667,13 @@ export default function Dashboard() {
         <RefreshCw size={22} className="text-white animate-spin" />
       </div>
       <p className="text-sm text-gray-400 font-medium">Loading your dashboard…</p>
+    </div>
+  )
+  if (loadError) return (
+    <div className="flex flex-col items-center justify-center h-72 gap-4">
+      <AlertTriangle size={32} className="text-red-400" />
+      <p className="text-sm text-gray-500">Dashboard failed to load.</p>
+      <button className="btn-primary text-sm px-4 py-2" onClick={() => load()}>Retry</button>
     </div>
   )
   if (!data) return null

@@ -55,7 +55,7 @@ export default function OnboardingWizard() {
   const saveCompany = async () => {
     setSaving(true)
     try {
-      await settingsAPI.updateProfile({ ...company, logo_text: company.logo_text || '🏪' })
+      await settingsAPI.updateCompany({ ...company, logo_text: company.logo_text || '🏪' })
       next()
     } catch { next() }
     setSaving(false)

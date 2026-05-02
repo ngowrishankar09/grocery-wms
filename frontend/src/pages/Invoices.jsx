@@ -670,9 +670,10 @@ function FromOrderModal({ onClose, onCreated }) {
 
 // ── Aging Summary Panel ───────────────────────────────────────
 function AgingPanel({ onMarkOverdue }) {
-  const [aging,    setAging]    = useState(null)
-  const [marking,  setMarking]  = useState(false)
-  const [show,     setShow]     = useState(false)
+  const [aging,     setAging]     = useState(null)
+  const [marking,   setMarking]   = useState(false)
+  const [reminding, setReminding] = useState(false)
+  const [show,      setShow]      = useState(false)
 
   useEffect(() => {
     invoiceAPI.agingSummary().then(r => setAging(r.data)).catch(() => {})
@@ -690,6 +691,17 @@ function AgingPanel({ onMarkOverdue }) {
     } catch (e) {
       alert(e?.response?.data?.detail || 'Failed')
     } finally { setMarking(false) }
+  }
+
+  const handleSendReminders = async () => {
+    if (!window.confirm('Send payment reminder emails to all customers with overdue invoices?')) return
+    setReminding(true)
+    try {
+      const r = await invoiceAPI.sendReminders()
+      alert(r.data?.message || 'Reminders sent.')
+    } catch (e) {
+      alert(e?.response?.data?.detail || 'Failed to send reminders')
+    } finally { setReminding(false) }
   }
 
   if (!aging) return null
@@ -714,13 +726,22 @@ function AgingPanel({ onMarkOverdue }) {
           {show ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
         </button>
         {hasOverdue && (
-          <button
-            onClick={handleMarkOverdue}
-            disabled={marking}
-            className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-red-50 text-red-700 border border-red-200 rounded-lg hover:bg-red-100 disabled:opacity-50"
-          >
-            <AlertTriangle size={12} /> {marking ? 'Updating…' : 'Mark Overdue'}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleSendReminders}
+              disabled={reminding}
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg hover:bg-blue-100 disabled:opacity-50"
+            >
+              <Send size={12} /> {reminding ? 'Sending…' : 'Send Reminders'}
+            </button>
+            <button
+              onClick={handleMarkOverdue}
+              disabled={marking}
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-red-50 text-red-700 border border-red-200 rounded-lg hover:bg-red-100 disabled:opacity-50"
+            >
+              <AlertTriangle size={12} /> {marking ? 'Updating…' : 'Mark Overdue'}
+            </button>
+          </div>
         )}
       </div>
       {show && (
@@ -758,7 +779,7 @@ export default function Invoices() {
       const params = statusFilter !== 'all' ? { status: statusFilter } : {}
       const r = await invoiceAPI.list(params)
       setInvoices(r.data)
-    } catch {}
+    } catch (e) { console.error('Invoice load failed:', e) }
     setLoading(false)
   }, [statusFilter])
 

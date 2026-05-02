@@ -196,7 +196,7 @@ export default function PortalCatalog() {
                 {/* Product image */}
                 <div className="h-28 sm:h-32 bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center overflow-hidden relative">
                   {p.image_url
-                    ? <img src={`http://localhost:8000${p.image_url}`} alt={p.product_name} className="h-full w-full object-cover" />
+                    ? <img src={`${import.meta.env.VITE_API_URL || ''}${p.image_url}`} alt={p.product_name} className="h-full w-full object-cover" />
                     : <Package size={34} className="text-gray-300" />
                   }
                   {!inStock && (
