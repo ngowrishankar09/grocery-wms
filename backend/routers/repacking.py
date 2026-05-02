@@ -535,6 +535,18 @@ def create_bom(
         if not db.query(SKU).filter(SKU.id == sku_id).first():
             raise HTTPException(status_code=404, detail=f"SKU {sku_id} not found")
 
+    # Prevent duplicate BOM for the same (output, input) pair
+    existing = db.query(BillOfMaterial).filter(
+        BillOfMaterial.company_id     == company_id,
+        BillOfMaterial.output_sku_id  == body.output_sku_id,
+        BillOfMaterial.input_sku_id   == body.input_sku_id,
+    ).first()
+    if existing:
+        raise HTTPException(
+            status_code=409,
+            detail="A BOM link between these two SKUs already exists. Edit the existing one instead.",
+        )
+
     bom = BillOfMaterial(
         company_id        = company_id,
         output_sku_id     = body.output_sku_id,
@@ -1033,6 +1045,46 @@ def reopen_run(
     db.commit()
     db.refresh(run)
     return _fmt_run(run, db)
+
+
+@router.delete("/runs/{run_id}", status_code=204)
+def delete_run(
+    run_id:     int,
+    db:         Session = Depends(get_db),
+    company_id: int     = Depends(get_company_id),
+):
+    """
+    Delete a packing run and all its child records (outputs, bulk entries, cost lines).
+    Closed runs cannot be deleted — reopen first if correction is needed.
+    """
+    run = db.query(PackingRun).filter(
+        PackingRun.id == run_id,
+        PackingRun.company_id == company_id,
+    ).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if run.status == "closed":
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot delete a closed run. Reopen it first if you need to remove it.",
+        )
+
+    # Delete child records first
+    db.query(PackingRunOutput).filter(PackingRunOutput.run_id == run_id).delete()
+    db.query(PackingRunBulk).filter(PackingRunBulk.run_id == run_id).delete()
+    try:
+        from models import RunCostLine
+        db.query(RunCostLine).filter(RunCostLine.run_id == run_id).delete()
+    except Exception:
+        pass
+    try:
+        db.query(PackingRunCost).filter(PackingRunCost.run_id == run_id).delete()
+    except Exception:
+        pass
+
+    db.delete(run)
+    db.commit()
+    return None
 
 
 # ── Summary endpoint ─────────────────────────────────────────────

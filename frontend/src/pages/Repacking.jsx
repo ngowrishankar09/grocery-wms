@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { repackingAPI, skuAPI } from '../api/client'
+import { Link } from 'react-router-dom'
 import {
   Loader2, Plus, Trash2, Package, ChevronLeft, AlertTriangle,
   CheckCircle2, X, Factory, Scale, DollarSign, Edit2, Save,
-  ChevronDown, Play,
+  ChevronDown, Play, ExternalLink,
 } from 'lucide-react'
 
 // ── Formatting helpers ────────────────────────────────────────
@@ -2153,10 +2154,10 @@ function PurchasesTab({ skus, onStartPacking, preFillSkuId, onSaved }) {
                         onClick={() => {
                           const items = purchase.items
                           if (items.length === 1) {
-                            onStartPacking(purchase.id, items[0].bulk_sku_id, purchase.batch_ref || `Batch #${purchase.id}`, items[0].bulk_sku_name)
+                            onStartPacking(null, items[0].bulk_sku_id, purchase.batch_ref || `Batch #${purchase.id}`, items[0].bulk_sku_name)
                           } else {
                             // Multiple bulk SKUs — switch tab and let user pick
-                            onStartPacking(purchase.id, null, purchase.batch_ref || `Batch #${purchase.id}`, null)
+                            onStartPacking(null, null, purchase.batch_ref || `Batch #${purchase.id}`, null)
                           }
                         }}
                         className="flex items-center gap-1 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 px-2.5 py-1.5 rounded-lg transition-colors shadow-sm"
@@ -2229,7 +2230,7 @@ function PurchasesTab({ skus, onStartPacking, preFillSkuId, onSaved }) {
                               {onStartPacking && (
                                 <td className="px-4 py-2.5 text-right">
                                   <button
-                                    onClick={() => onStartPacking(purchase.id, item.bulk_sku_id, purchase.batch_ref || `Batch #${purchase.id}`, item.bulk_sku_name)}
+                                    onClick={() => onStartPacking(null, item.bulk_sku_id, purchase.batch_ref || `Batch #${purchase.id}`, item.bulk_sku_name)}
                                     className="flex items-center gap-1 text-xs font-semibold text-blue-600 hover:text-white hover:bg-blue-600 border border-blue-200 hover:border-blue-600 px-2 py-1 rounded-lg transition-all whitespace-nowrap"
                                   >
                                     <Play size={10} /> Pack this
@@ -2263,7 +2264,7 @@ function PurchasesTab({ skus, onStartPacking, preFillSkuId, onSaved }) {
                           <button
                             onClick={() => {
                               const items = purchase.items
-                              onStartPacking(purchase.id, items.length === 1 ? items[0].bulk_sku_id : null, purchase.batch_ref || `Batch #${purchase.id}`, items.length === 1 ? items[0].bulk_sku_name : null)
+                              onStartPacking(null, items.length === 1 ? items[0].bulk_sku_id : null, purchase.batch_ref || `Batch #${purchase.id}`, items.length === 1 ? items[0].bulk_sku_name : null)
                             }}
                             className="flex items-center gap-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 px-3 py-1.5 rounded-lg transition-colors"
                           >
@@ -2593,6 +2594,7 @@ function RunsTab({ skus, landedCosts, preFill, onPreFillConsumed }) {
     onPreFillConsumed?.()
   }, [preFill])
   const [runFormError, setRunFormError] = useState(null)
+  const [runStockWarning, setRunStockWarning] = useState(null)
   const [creatingRun, setCreatingRun]   = useState(false)
 
   const [showAddOutput, setShowAddOutput] = useState(false)
@@ -2668,9 +2670,9 @@ function RunsTab({ skus, landedCosts, preFill, onPreFillConsumed }) {
       setRunForm({ run_ref: '', bulk_sku_id: '', qty_start: '', started_by: '', notes: '', landed_cost_id: '', units_planned: '' })
       await loadRuns()
       handleSelectRun(res.data)
-      // Show stock warning if server returned one
+      // Show stock warning inline if server returned one
       if (res.data.stock_warning) {
-        setTimeout(() => alert('⚠️ Stock Warning:\n\n' + res.data.stock_warning), 300)
+        setRunStockWarning(res.data.stock_warning)
       }
     } catch (e) {
       setRunFormError(e.response?.data?.detail || 'Failed to create run')
@@ -2679,7 +2681,7 @@ function RunsTab({ skus, landedCosts, preFill, onPreFillConsumed }) {
 
   const handleAddOutput = async (e) => {
     e.preventDefault(); setOutputFormError(null)
-    if (!outputForm.sku_id || (!outputForm.units_packed && !outputForm.qty_packed)) {
+    if (!outputForm.sku_id || !outputForm.units_packed) {
       setOutputFormError('Please select a SKU and enter units packed.'); return
     }
     const sku = skus.find(s => String(s.id) === String(outputForm.sku_id))
@@ -2740,6 +2742,15 @@ function RunsTab({ skus, landedCosts, preFill, onPreFillConsumed }) {
     } catch (e) { alert(e.response?.data?.detail || 'Failed to reopen run') }
   }
 
+  const handleDeleteRun = async () => {
+    if (!window.confirm('Delete this packing session? This cannot be undone. Only open sessions can be deleted.')) return
+    try {
+      await repackingAPI.deleteRun(runDetail.id)
+      setRunDetail(null)
+      loadRuns()
+    } catch (e) { alert(e.response?.data?.detail || 'Failed to delete run') }
+  }
+
   const handleCloseRun = async (e) => {
     e.preventDefault(); setCloseError(null)
     const bulkEntries = runDetail.bulk_entries.map(b => ({
@@ -2791,6 +2802,18 @@ function RunsTab({ skus, landedCosts, preFill, onPreFillConsumed }) {
           <ChevronLeft size={16} /> Back to Sessions
         </button>
 
+        {/* Stock warning banner — shown when new run started with insufficient stock */}
+        {runStockWarning && (
+          <div className="flex items-start gap-3 bg-amber-50 border border-amber-300 rounded-xl px-4 py-3 mb-3">
+            <AlertTriangle size={16} className="text-amber-600 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="text-sm font-semibold text-amber-800">Stock Warning</p>
+              <p className="text-xs text-amber-700 mt-0.5">{runStockWarning}</p>
+            </div>
+            <button onClick={() => setRunStockWarning(null)} className="text-amber-400 hover:text-amber-600 text-lg leading-none">×</button>
+          </div>
+        )}
+
         {detailLoading && !runDetail ? (
           <div className="flex justify-center py-12"><Loader2 className="animate-spin text-blue-500" size={28} /></div>
         ) : runDetail ? (
@@ -2818,6 +2841,15 @@ function RunsTab({ skus, landedCosts, preFill, onPreFillConsumed }) {
                         title="Re-open this session to add more outputs or adjust bulk weights"
                       >
                         ↩ Re-open Session
+                      </button>
+                    )}
+                    {runDetail.status === 'open' && (
+                      <button
+                        onClick={handleDeleteRun}
+                        className="text-xs font-medium px-2 py-0.5 rounded-full bg-red-100 text-red-600 hover:bg-red-200 transition-colors"
+                        title="Delete this open session permanently"
+                      >
+                        🗑 Delete Session
                       </button>
                     )}
                   </div>
@@ -3136,7 +3168,12 @@ function RunsTab({ skus, landedCosts, preFill, onPreFillConsumed }) {
             {/* Bulk usage section */}
             <div className="card">
               <div className="flex items-center justify-between mb-3">
-                <h3 className="font-semibold text-gray-800">Raw Material Used</h3>
+                <div className="flex items-center gap-3">
+                  <h3 className="font-semibold text-gray-800">Raw Material Used</h3>
+                  <Link to="/inventory" className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 font-medium">
+                    <ExternalLink size={11} /> View Inventory
+                  </Link>
+                </div>
                 {runDetail.status === 'open' && (
                   <button
                     onClick={() => { setShowAddBulk(s => !s); setAddBulkError(null) }}

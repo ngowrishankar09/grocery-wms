@@ -210,7 +210,7 @@ function BulkUploadModal({ categories, onClose, onImported }) {
   }
 
   const handleConfirm = async () => {
-    const toCreate = rows.filter(r => r._selected && r.status !== 'duplicate' || (r._selected && !skipDuplicates))
+    const toCreate = rows.filter(r => r._selected && (r.status !== 'duplicate' || !skipDuplicates))
     if (toCreate.length === 0) return alert('No new SKUs selected to import.')
     setLoading(true)
     try {
@@ -598,7 +598,9 @@ function SKUFormModal({ form, editId, categories, vendors, bins, saving, onSet, 
       try {
         const r = await uploadAPI.productImage(editId, file)
         onSet('image_url', r.data.image_url)
-      } catch {}
+      } catch (e) {
+        alert('Image upload failed: ' + (e.response?.data?.detail || e.message || 'Unknown error'))
+      }
       setUploading(false)
     } else {
       // Create mode: hand the file to the parent for upload after SKU is saved
@@ -1527,7 +1529,7 @@ export default function SKUs({ lang }) {
                         {sku.wh1_cases}
                       </span>
                       <button
-                        onClick={() => setAdjustRow({ sku_id: sku.sku_id ?? sku.id, sku_code: sku.sku_code, product_name: sku.product_name, warehouse: 'WH1', current: sku.wh1_cases })}
+                        onClick={() => setAdjustRow({ sku_id: sku.id, sku_code: sku.sku_code, product_name: sku.product_name, warehouse: 'WH1', current: sku.wh1_cases })}
                         className="p-1 text-gray-300 hover:text-orange-500 hover:bg-orange-50 rounded transition-colors"
                         title="Adjust WH1 stock"
                       >
@@ -1541,7 +1543,7 @@ export default function SKUs({ lang }) {
                     <div className="flex items-center justify-center gap-1">
                       <span className="font-medium text-blue-700">{sku.wh2_cases}</span>
                       <button
-                        onClick={() => setAdjustRow({ sku_id: sku.sku_id ?? sku.id, sku_code: sku.sku_code, product_name: sku.product_name, warehouse: 'WH2', current: sku.wh2_cases })}
+                        onClick={() => setAdjustRow({ sku_id: sku.id, sku_code: sku.sku_code, product_name: sku.product_name, warehouse: 'WH2', current: sku.wh2_cases })}
                         className="p-1 text-gray-300 hover:text-orange-500 hover:bg-orange-50 rounded transition-colors"
                         title="Adjust WH2 stock"
                       >

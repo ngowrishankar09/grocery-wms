@@ -483,6 +483,7 @@ export const repackingAPI = {
   removeBulk:  (id, skuId)=> api.delete(`/repacking/runs/${id}/bulk/${skuId}`),
   closeRun:    (id, data) => api.post(`/repacking/runs/${id}/close`, data),
   reopenRun:   (id)       => api.post(`/repacking/runs/${id}/reopen`),
+  deleteRun:   (id)       => api.delete(`/repacking/runs/${id}`),
   summary:     (params)   => api.get('/repacking/summary', { params }),
   // Individual landed costs (legacy / single-SKU)
   listLandedCosts:  ()         => api.get('/repacking/landed-costs'),
