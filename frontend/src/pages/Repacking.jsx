@@ -280,7 +280,7 @@ function InlineWeightSetter({ sku, qtyMode, onApply }) {
 }
 
 // ── Tab 1: Bill of Materials (Bulk → Retail yields) ───────────
-function BOMTab({ skus, refreshSkus, onGoToStock, onSaved }) {
+function BOMTab({ skus, refreshSkus, onGoToStock, onSaved, bulkStocks = {} }) {
   const [boms, setBoms]           = useState([])
   const [loading, setLoading]     = useState(true)
   const [error, setError]         = useState(null)
@@ -897,6 +897,18 @@ function BOMTab({ skus, refreshSkus, onGoToStock, onSaved }) {
               {grouped.map(group => {
                 const sku = skus.find(s => String(s.id) === String(group.bulk_id))
                 const isSelected = String(selectedBulkId) === String(group.bulk_id)
+                const stock = bulkStocks[String(group.bulk_id)]
+                const totalSacks = stock?.total_cases ?? null
+                // Compute kg equivalent if unit_weight known
+                const toKgNum = (w, uom) => {
+                  if (!w) return null
+                  const u = (uom || 'g').toLowerCase()
+                  if (u === 'kg') return w; if (u === 'g') return w / 1000
+                  if (u === 'lbs') return w * 0.453592; if (u === 'oz') return w * 0.0283495
+                  return w / 1000
+                }
+                const sackKg = toKgNum(sku?.unit_weight, sku?.unit_weight_uom)
+                const totalKg = totalSacks != null && sackKg ? totalSacks * sackKg : null
                 return (
                   <button
                     key={group.bulk_id}
@@ -916,7 +928,7 @@ function BOMTab({ skus, refreshSkus, onGoToStock, onSaved }) {
                         group.outputs.length > 0 ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'
                       }`}>{group.outputs.length}</span>
                     </div>
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1.5 flex-wrap">
                       <span className="text-[11px] text-gray-400 font-mono truncate">{group.bulk_code}</span>
                       {sku?.unit_weight && (
                         <span className="text-[10px] bg-gray-100 text-gray-500 px-1 py-0.5 rounded font-mono flex-shrink-0">
@@ -924,6 +936,24 @@ function BOMTab({ skus, refreshSkus, onGoToStock, onSaved }) {
                         </span>
                       )}
                     </div>
+                    {/* Stock level pill */}
+                    {totalSacks != null && (
+                      <div className={`mt-1 inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
+                        totalSacks === 0
+                          ? 'bg-red-100 text-red-600'
+                          : totalSacks <= 2
+                          ? 'bg-amber-100 text-amber-700'
+                          : 'bg-emerald-50 text-emerald-700'
+                      }`}>
+                        <span className={`w-1.5 h-1.5 rounded-full ${totalSacks === 0 ? 'bg-red-500' : totalSacks <= 2 ? 'bg-amber-500' : 'bg-emerald-500'}`} />
+                        {totalSacks === 0
+                          ? 'Out of stock'
+                          : totalKg != null
+                            ? `${totalSacks} sack${totalSacks !== 1 ? 's' : ''} · ${totalKg % 1 === 0 ? totalKg : totalKg.toFixed(1)}kg`
+                            : `${totalSacks} sack${totalSacks !== 1 ? 's' : ''}`
+                        }
+                      </div>
+                    )}
                   </button>
                 )
               })}
@@ -957,8 +987,19 @@ function BOMTab({ skus, refreshSkus, onGoToStock, onSaved }) {
                     {(() => {
                       const sku = skus.find(s => String(s.id) === String(selectedGroup.bulk_id))
                       if (!sku) return null
+                      const stock = bulkStocks[String(selectedGroup.bulk_id)]
+                      const totalSacks = stock?.total_cases ?? null
+                      const toKgNum = (w, uom) => {
+                        if (!w) return null
+                        const u = (uom || 'g').toLowerCase()
+                        if (u === 'kg') return w; if (u === 'g') return w / 1000
+                        if (u === 'lbs') return w * 0.453592; if (u === 'oz') return w * 0.0283495
+                        return w / 1000
+                      }
+                      const sackKg = toKgNum(sku.unit_weight, sku.unit_weight_uom)
+                      const totalKg = totalSacks != null && sackKg ? totalSacks * sackKg : null
                       return (
-                        <div className="flex items-center gap-1.5 ml-1">
+                        <div className="flex items-center gap-1.5 ml-1 flex-wrap">
                           {sku.unit_weight && (
                             <span className="text-xs bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-full font-medium flex-shrink-0">
                               {sku.unit_weight}{sku.unit_weight_uom || 'g'}/bag
@@ -967,6 +1008,23 @@ function BOMTab({ skus, refreshSkus, onGoToStock, onSaved }) {
                           {sku.cost_price && (
                             <span className="text-xs bg-green-50 text-green-700 border border-green-200 px-2 py-0.5 rounded-full font-medium flex-shrink-0">
                               ${sku.cost_price}/kg
+                            </span>
+                          )}
+                          {/* Current stock badge */}
+                          {totalSacks != null && (
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-semibold border flex-shrink-0 ${
+                              totalSacks === 0
+                                ? 'bg-red-50 text-red-700 border-red-200'
+                                : totalSacks <= 2
+                                ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                            }`}>
+                              {totalSacks === 0
+                                ? '⚠ Out of stock'
+                                : totalKg != null
+                                  ? `${totalSacks} sack${totalSacks !== 1 ? 's' : ''} · ${totalKg % 1 === 0 ? totalKg : totalKg.toFixed(1)} kg in stock`
+                                  : `${totalSacks} sack${totalSacks !== 1 ? 's' : ''} in stock`
+                              }
                             </span>
                           )}
                         </div>
@@ -3788,6 +3846,7 @@ export default function Repacking() {
   const [activeTab, setActiveTab]       = useState(0)
   const [skus, setSkus]                 = useState([])
   const [skusLoading, setSkusLoading]   = useState(true)
+  const [bulkStocks, setBulkStocks]     = useState({}) // { [sku_id]: { wh1_cases, wh2_cases, total_cases } }
   const [landedCosts, setLandedCosts]   = useState([])
   const [flaggedCount, setFlaggedCount] = useState(0)
   const [bomCount, setBomCount]         = useState(0)
@@ -3807,7 +3866,17 @@ export default function Repacking() {
       .catch(() => setSkus([]))
       .finally(() => setSkusLoading(false))
 
-    // Priority 2: background — each updates independently, never blocks the page
+    // Priority 2: bulk SKU stock levels — full mode but only bulk materials (small set)
+    skuAPI.getBulkStock()
+      .then(res => {
+        const items = Array.isArray(res.data) ? res.data : []
+        const map = {}
+        items.forEach(s => { map[String(s.id)] = { wh1_cases: s.wh1_cases || 0, wh2_cases: s.wh2_cases || 0, total_cases: s.total_cases || 0 } })
+        setBulkStocks(map)
+      })
+      .catch(() => {})
+
+    // Priority 3: background — each updates independently, never blocks the page
     repackingAPI.listLandedCosts()
       .then(res => setLandedCosts(Array.isArray(res.data) ? res.data : []))
       .catch(() => {})
@@ -3976,6 +4045,7 @@ export default function Repacking() {
           {activeTab === 0 && <BOMTab skus={skus} refreshSkus={refreshSkus}
             onGoToStock={skuId => { setStockPreFillSkuId(skuId); handleTabChange(1) }}
             onSaved={() => setBomCount(c => c + 1)}
+            bulkStocks={bulkStocks}
           />}
           {activeTab === 1 && <PurchasesTab skus={skus} onStartPacking={handleStartPacking}
             preFillSkuId={stockPreFillSkuId}

@@ -40,6 +40,7 @@ export const skuAPI = {
   lookupBarcode: (barcode) => api.get(`/skus/barcode/${barcode}`),
   getBulkLinks: (id) => api.get(`/skus/${id}/bulk-links`),
   setBulkLinks: (id, links) => api.put(`/skus/${id}/bulk-links`, links),
+  getBulkStock: () => api.get('/skus/', { params: { is_bulk: true } }),  // full mode (with inventory) for bulk SKUs only
 }
 
 export const vendorAPI = {

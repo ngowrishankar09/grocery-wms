@@ -68,6 +68,7 @@ def list_skus(
     search: Optional[str] = None,
     category: Optional[str] = None,
     lean: Optional[bool] = False,
+    is_bulk: Optional[bool] = None,
     db: Session = Depends(get_db),
     company_id: int = Depends(get_company_id),
 ):
@@ -79,6 +80,8 @@ def list_skus(
         )
     if category:
         q = q.filter(SKU.category == category)
+    if is_bulk is not None:
+        q = q.filter(SKU.is_bulk_material == is_bulk)
 
     skus = q.order_by(SKU.category, SKU.product_name).all()
 
