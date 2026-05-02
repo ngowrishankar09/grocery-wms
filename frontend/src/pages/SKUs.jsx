@@ -536,7 +536,7 @@ function BulkUploadModal({ categories, onClose, onImported }) {
   )
 }
 
-const BACKEND = 'http://localhost:8000'
+const BACKEND = import.meta.env.VITE_API_URL ? import.meta.env.VITE_API_URL.replace(/\/$/, '') : 'http://localhost:8000'
 
 // ── SKU Form Modal ──────────────────────────────────────────────
 function SKUFormModal({ form, editId, categories, vendors, bins, saving, onSet, onSubmit, onClose, onImageFileReady, bulkLinks = [], setBulkLinks, allSkus = [] }) {

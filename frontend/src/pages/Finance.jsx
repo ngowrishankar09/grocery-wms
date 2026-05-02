@@ -67,12 +67,13 @@ function Bar({ value, max, color = 'bg-blue-500' }) {
 function JournalLedger() {
   const [entries, setEntries] = useState([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(false)
   const [expanded, setExpanded] = useState(null)
 
   useEffect(() => {
     invoiceAPI.journal(100)
       .then(r => setEntries(r.data))
-      .catch(() => {})
+      .catch(() => setLoadError(true))
       .finally(() => setLoading(false))
   }, [])
 
@@ -95,6 +96,11 @@ function JournalLedger() {
 
       {loading ? (
         <div className="py-10 text-center text-gray-400 text-sm">Loading…</div>
+      ) : loadError ? (
+        <div className="py-10 text-center text-red-400 text-sm">
+          <BookOpen size={32} className="mx-auto mb-2 opacity-30" />
+          Could not load journal entries. Please refresh.
+        </div>
       ) : entries.length === 0 ? (
         <div className="py-10 text-center text-gray-400 text-sm">
           <BookOpen size={32} className="mx-auto mb-2 opacity-30" />

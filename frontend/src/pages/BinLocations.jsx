@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback } from 'react'
-import axios from 'axios'
+import api from '../api/client'
 import {
   MapPin, Plus, Search, Package, RefreshCw, ChevronDown, ChevronRight,
   Edit2, Trash2, Check, X, Layers, ArrowRight, Zap, Grid3X3, Printer, Tag
 } from 'lucide-react'
 import { labelAPI } from '../api/client'
 
-const API = axios.create({ baseURL: 'http://localhost:8000' })
+const API = api  // alias kept so existing call-sites work unchanged
 
 // ── Bin badge ──────────────────────────────────────────────────
 function BinBadge({ code, className = '' }) {

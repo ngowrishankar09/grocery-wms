@@ -9,7 +9,7 @@ import {
   Bell, FileText, ClipboardList, X, AlertTriangle, Clock, Archive, ChevronRight,
   LayoutGrid, Table2, BookOpen, MapPin, ShoppingBag, Smartphone, Menu, Store,
   RotateCcw, Receipt, UserCircle2, LogOut, Shield, Tags, ChevronDown, CheckSquare, BarChart2,
-  GitBranch, FileX, Scale, Activity, CreditCard, DollarSign, ScanLine, Factory
+  GitBranch, FileX, Scale, Activity, CreditCard, DollarSign, ScanLine, Factory, Wand2
 } from 'lucide-react'
 
 // Section → icon + accent colour
@@ -95,6 +95,7 @@ const navGroups = (t) => [
       { to: '/spreadsheet', icon: Table2,    label: 'Spreadsheets' },
       { to: '/quickbooks',  icon: BookOpen,  label: 'QuickBooks' },
       { to: '/settings',    icon: Settings,  label: 'Settings' },
+      { to: '/onboarding',  icon: Wand2,     label: 'Setup Wizard' },
     ],
   },
 ]

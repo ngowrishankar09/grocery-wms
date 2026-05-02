@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import axios from 'axios'
+import api from '../api/client'
 import {
   CheckCircle, XCircle, RefreshCw, Link, Link2Off,
   ChevronDown, ChevronRight, ExternalLink, AlertTriangle,
@@ -7,7 +7,7 @@ import {
   Copy, Check
 } from 'lucide-react'
 
-const API = axios.create({ baseURL: 'http://localhost:8000' })
+const API = api  // alias so existing call-sites work unchanged
 
 // ── Setup steps component ──────────────────────────────────────
 function SetupGuide({ redirectUri }) {
@@ -262,8 +262,8 @@ function ActionCard({ icon: Icon, title, description, colour, buttonLabel, butto
   )
 }
 
-// Keep the old name as an alias so we don't need to change call sites
-const SyncCard = (props) => <ActionCard {...props} buttonLabel="Sync Now" />
+// SyncCard: forwards `onSync` prop as `onRun` so ActionCard's handler fires correctly
+const SyncCard = ({ onSync, ...rest }) => <ActionCard {...rest} buttonLabel="Sync Now" onRun={onSync} />
 
 // ── Sync log table ─────────────────────────────────────────────
 function SyncLog() {

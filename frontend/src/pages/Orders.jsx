@@ -439,7 +439,7 @@ function CatalogModal({ skus, customers, mode, orderNumber, initialCart = {}, in
                   <div key={p.id} className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden flex flex-col hover:shadow-md transition-shadow">
                     <div className="h-24 bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center overflow-hidden relative">
                       {p.image_url
-                        ? <img src={`http://localhost:8000${p.image_url}`} alt={p.product_name} className="h-full w-full object-cover" />
+                        ? <img src={`${import.meta.env.VITE_API_URL || ''}${p.image_url}`} alt={p.product_name} className="h-full w-full object-cover" />
                         : <Package size={28} className="text-gray-300" />
                       }
                       {!inStock && (

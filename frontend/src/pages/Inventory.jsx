@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react'
 import { inventoryAPI, skuAPI, uploadAPI, receivingAPI, warehouseTaskAPI } from '../api/client'
+import api from '../api/client'
 import { useT } from '../i18n/translations'
 import { Search, Filter, MapPin, X, Check, Camera, Layers, Package, Lock, Unlock, AlertTriangle } from 'lucide-react'
-import axios from 'axios'
 import BarcodeScanner from '../components/BarcodeScanner'
 
-const API = axios.create({ baseURL: 'http://localhost:8000' })
+const API = api  // alias kept so existing call-sites work unchanged
 
 const stockBadge = (status) => {
   if (status === 'stockout') return <span className="badge-danger">Stockout</span>

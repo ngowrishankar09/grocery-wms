@@ -1,13 +1,12 @@
 import { useEffect, useState, useRef } from 'react'
 import { skuAPI, uploadAPI } from '../api/client'
-import axios from 'axios'
+import api from '../api/client'
 import { useT } from '../i18n/translations'
 import {
   Plus, Trash2, CheckCircle, Camera, FileText,
   X, AlertCircle, Send, Clock, ChevronRight, ImageIcon
 } from 'lucide-react'
 
-const api = axios.create({ baseURL: 'http://localhost:8000' })
 const dispatchAPI = {
   create: (data) => api.post('/dispatch/', data),
   list:   ()     => api.get('/dispatch/'),

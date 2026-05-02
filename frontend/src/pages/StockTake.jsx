@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
-import { stockTakeAPI, settingsAPI, uploadAPI } from '../api/client'
+import { stockTakeAPI, settingsAPI, uploadAPI, skuAPI } from '../api/client'
 import {
   ClipboardList, Search, Check, X, AlertTriangle,
   TrendingDown, TrendingUp, Minus, RefreshCw, Trash2, Camera
@@ -17,10 +17,8 @@ function WriteOffModal({ onClose, onSaved }) {
   const [error, setError]     = useState('')
 
   useEffect(() => {
-    // Load SKUs via inventory endpoint
-    fetch('http://localhost:8000/skus/?limit=500')
-      .then(r => r.json())
-      .then(d => setSkus(d))
+    skuAPI.list({ lean: true })
+      .then(r => setSkus(Array.isArray(r.data) ? r.data : []))
       .catch(() => {})
   }, [])
 

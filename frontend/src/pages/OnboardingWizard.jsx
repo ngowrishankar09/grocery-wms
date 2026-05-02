@@ -65,7 +65,7 @@ export default function OnboardingWizard() {
     setSaving(true)
     try {
       for (const cat of categories) {
-        try { await settingsAPI.createCategory?.({ name: cat }) } catch {}
+        try { await settingsAPI.createCategory({ name: cat }) } catch {}
       }
     } catch {}
     setSaving(false)
