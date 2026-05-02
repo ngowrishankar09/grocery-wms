@@ -53,10 +53,10 @@ function StatusBadge({ status }) {
 // ── Workflow Guide (collapsible flow strip) ───────────────────
 function WorkflowGuide({ activeTab, onTabChange }) {
   const steps = [
-    { n: 1, label: 'Bill of Materials', tabIdx: 0 },
-    { n: 2, label: 'Purchases',         tabIdx: 1 },
-    { n: 3, label: 'Packing Runs',      tabIdx: 2 },
-    { n: 4, label: 'Summary',           tabIdx: 3 },
+    { n: 1, label: 'My Products',       tabIdx: 0 },
+    { n: 2, label: 'Packing Sessions',  tabIdx: 1 },
+    { n: 3, label: 'Stock Received',    tabIdx: 2 },
+    { n: 4, label: 'Audit Report',      tabIdx: 3 },
   ]
   return (
     <div className="mb-4">
@@ -1379,7 +1379,7 @@ function POQuickEntry({ bulkSkus, onCreated, onCancel }) {
 }
 
 // ── Tab 2: Purchases / Shipments ─────────────────────────────
-function PurchasesTab({ skus, onStartPacking, preFillSkuId, onSaved }) {
+function PurchasesTab({ skus, preFillSkuId, onSaved }) {
   const [purchases, setPurchases]   = useState([])
   const [loading, setLoading]       = useState(true)
   const [error, setError]           = useState(null)
@@ -2087,24 +2087,6 @@ function PurchasesTab({ skus, onStartPacking, preFillSkuId, onSaved }) {
                     <div className="text-xs text-gray-400">total cost</div>
                   </div>
                   <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
-                    {/* Start packing CTA — the core cross-step connection */}
-                    {onStartPacking && (purchase.items?.length ?? 0) > 0 && (
-                      <button
-                        onClick={() => {
-                          const items = purchase.items
-                          if (items.length === 1) {
-                            onStartPacking(null, items[0].bulk_sku_id, purchase.batch_ref || `Batch #${purchase.id}`, items[0].bulk_sku_name)
-                          } else {
-                            // Multiple bulk SKUs — switch tab and let user pick
-                            onStartPacking(null, null, purchase.batch_ref || `Batch #${purchase.id}`, null)
-                          }
-                        }}
-                        className="flex items-center gap-1 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 px-2.5 py-1.5 rounded-lg transition-colors shadow-sm"
-                        title="Start a packing session using this batch"
-                      >
-                        <Play size={11} /> Pack
-                      </button>
-                    )}
                     <button onClick={() => openEdit(purchase)} className="p-1.5 text-gray-400 hover:text-blue-500 rounded transition-colors" title="Edit"><Edit2 size={13} /></button>
                     <button onClick={() => handleDelete(purchase.id)} className="p-1.5 text-gray-400 hover:text-red-500 rounded transition-colors" title="Delete" disabled={deleting === purchase.id}>
                       {deleting === purchase.id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
@@ -2141,7 +2123,6 @@ function PurchasesTab({ skus, onStartPacking, preFillSkuId, onSaved }) {
                             <th className="px-4 py-2 text-right font-bold text-gray-700">Total</th>
                             <th className="px-4 py-2 text-right font-bold text-green-700">Cost/kg</th>
                             {purchase.currency !== 'USD' && <th className="px-4 py-2 text-right font-bold text-blue-700">Cost/kg (USD)</th>}
-                            {onStartPacking && <th className="px-4 py-2 w-24" />}
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100">
@@ -2166,16 +2147,6 @@ function PurchasesTab({ skus, onStartPacking, preFillSkuId, onSaved }) {
                                   {item.cost_per_kg_base != null ? `$${(+item.cost_per_kg_base).toFixed(4)}/kg` : '—'}
                                 </td>
                               )}
-                              {onStartPacking && (
-                                <td className="px-4 py-2.5 text-right">
-                                  <button
-                                    onClick={() => onStartPacking(null, item.bulk_sku_id, purchase.batch_ref || `Batch #${purchase.id}`, item.bulk_sku_name)}
-                                    className="flex items-center gap-1 text-xs font-semibold text-blue-600 hover:text-white hover:bg-blue-600 border border-blue-200 hover:border-blue-600 px-2 py-1 rounded-lg transition-all whitespace-nowrap"
-                                  >
-                                    <Play size={10} /> Pack this
-                                  </button>
-                                </td>
-                              )}
                             </tr>
                           ))}
                         </tbody>
@@ -2197,20 +2168,7 @@ function PurchasesTab({ skus, onStartPacking, preFillSkuId, onSaved }) {
                         <Loader2 size={12} className="animate-spin" /> Loading packing runs…
                       </div>
                     ) : !utilisation[purchase.id] || utilisation[purchase.id].total_runs === 0 ? (
-                      <div className="flex items-center justify-between">
-                        <p className="text-xs text-gray-400 italic">No packing sessions from this batch yet.</p>
-                        {onStartPacking && (purchase.items?.length ?? 0) > 0 && (
-                          <button
-                            onClick={() => {
-                              const items = purchase.items
-                              onStartPacking(null, items.length === 1 ? items[0].bulk_sku_id : null, purchase.batch_ref || `Batch #${purchase.id}`, items.length === 1 ? items[0].bulk_sku_name : null)
-                            }}
-                            className="flex items-center gap-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 px-3 py-1.5 rounded-lg transition-colors"
-                          >
-                            <Play size={11} /> Start Packing from this batch →
-                          </button>
-                        )}
-                      </div>
+                      <p className="text-xs text-gray-400 italic">No packing sessions from this batch yet. Go to the Packing Sessions tab to start one.</p>
                     ) : (() => {
                       const u = utilisation[purchase.id]
                       return (
@@ -3895,15 +3853,14 @@ export default function Repacking() {
     }
   }
 
-  // Called from PurchasesTab "Pack" button — switches to Packing Sessions with context
+  // Switch to Packing Sessions tab (tab 1) with optional pre-fill context
   const handleStartPacking = async (landedCostId, bulkSkuId, batchRef, bulkSkuName) => {
-    // Refresh landed costs so RunsTab has the latest list
     try {
       const res = await repackingAPI.listLandedCosts()
       setLandedCosts(Array.isArray(res.data) ? res.data : [])
     } catch {}
     setRunPreFill({ landed_cost_id: landedCostId, bulk_sku_id: bulkSkuId, batchRef, bulkSkuName })
-    setActiveTab(2)
+    setActiveTab(1)
   }
 
   // Build step data for the pipeline — drives status from real counts
@@ -3920,29 +3877,21 @@ export default function Repacking() {
       done:  bomCount > 0,
     },
     {
-      label: 'Purchase Orders',
-      stat:  purchaseCount > 0 ? `${purchaseCount} PO${purchaseCount !== 1 ? 's' : ''} recorded` : 'No orders yet',
-      hint:  purchaseCount > 0
-        ? 'Create POs or log individual deliveries with cost per kg'
-        : bomCount > 0 ? '← Ready! Create a PO with all your bulk items at once' : 'Set up My Products first',
-      done:  purchaseCount > 0,
-    },
-    {
       label: 'Packing Sessions',
       stat:  runCount > 0 ? `${runCount} session${runCount !== 1 ? 's' : ''}` : 'No sessions yet',
       hint:  runCount > 0
-        ? 'Track every packing run with output and waste'
-        : purchaseCount > 0 ? '← Stock logged. Ready to start packing' : 'Receive stock first',
-      done:  runCount > 0,
-    },
-    {
-      label: 'Audit Report',
-      stat:  flaggedCount > 0 ? `${flaggedCount} to investigate` : runCount > 0 ? 'All clear' : 'No data yet',
-      hint:  flaggedCount > 0
-        ? 'Some sessions used more material than expected'
-        : 'Review variance, costs, and efficiency',
+        ? `Track every packing run · ${flaggedCount > 0 ? `${flaggedCount} flagged` : 'all clear'}`
+        : bomCount > 0 ? '← Set up. Start your first session' : 'Set up My Products first',
       done:  runCount > 0,
       alert: flaggedCount > 0,
+    },
+    {
+      label: 'Stock Received',
+      stat:  purchaseCount > 0 ? `${purchaseCount} delivery record${purchaseCount !== 1 ? 's' : ''}` : 'No records yet',
+      hint:  purchaseCount > 0
+        ? 'Log what arrived and what it cost — cost/kg tracked automatically'
+        : 'Record each delivery: bulk qty + material cost + freight + duty',
+      done:  purchaseCount > 0,
     },
   ]
 
@@ -3973,48 +3922,48 @@ export default function Repacking() {
       )}
 
       {/* ── Auto-flow nudge banners — update immediately via onSaved callbacks ── */}
-      {activeTab === 0 && bomCount > 0 && purchaseCount === 0 && (
+      {activeTab === 0 && bomCount > 0 && runCount === 0 && (
         <div className="mb-4 flex items-center justify-between bg-blue-50 border-2 border-blue-300 rounded-xl px-4 py-3 shadow-sm">
           <div className="flex items-center gap-2">
             <span className="text-lg">✅</span>
             <p className="text-sm text-blue-800">
-              <strong>Step 1 complete!</strong> Your products are set up. Next: create a Purchase Order for all your bulk materials.
+              <strong>Step 1 complete!</strong> Your products are set up. Next: start a packing session to track production.
             </p>
           </div>
           <button onClick={() => handleTabChange(1)}
             className="ml-4 flex-shrink-0 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 px-3 py-1.5 rounded-lg flex items-center gap-1 transition-colors shadow-sm">
-            Step 2: Create PO →
+            Step 2: Start Packing →
           </button>
         </div>
       )}
-      {activeTab === 1 && purchaseCount > 0 && runCount === 0 && (
+      {activeTab === 1 && runCount > 0 && purchaseCount === 0 && (
         <div className="mb-4 flex items-center justify-between bg-blue-50 border-2 border-blue-300 rounded-xl px-4 py-3 shadow-sm">
           <div className="flex items-center gap-2">
             <span className="text-lg">✅</span>
             <p className="text-sm text-blue-800">
-              <strong>Step 2 complete!</strong> Stock recorded. Next: start a packing session to track production.
+              <strong>Step 2 complete!</strong> Packing sessions recorded. Next: log the bulk stock that was received.
             </p>
           </div>
           <button onClick={() => handleTabChange(2)}
             className="ml-4 flex-shrink-0 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 px-3 py-1.5 rounded-lg flex items-center gap-1 transition-colors shadow-sm">
-            Step 3: Start Packing →
+            Step 3: Log Stock Received →
           </button>
         </div>
       )}
-      {activeTab === 2 && runCount > 0 && (
+      {activeTab === 2 && purchaseCount > 0 && (
         <div className="mb-4 flex items-center justify-between bg-green-50 border-2 border-green-300 rounded-xl px-4 py-3 shadow-sm">
           <div className="flex items-center gap-2">
-            <span className="text-lg">{flaggedCount > 0 ? '⚠️' : '✅'}</span>
+            <span className="text-lg">✅</span>
             <p className="text-sm text-green-800">
-              {flaggedCount > 0
-                ? <span><strong>{flaggedCount} session{flaggedCount > 1 ? 's' : ''} flagged.</strong> Review variance in the Audit Report.</span>
-                : <span><strong>Packing sessions logged.</strong> Review efficiency and costs in the Audit Report.</span>}
+              <strong>All done!</strong> Stock received is logged. Inventory has been updated automatically.
             </p>
           </div>
-          <button onClick={() => handleTabChange(3)}
-            className={`ml-4 flex-shrink-0 text-sm font-semibold text-white px-3 py-1.5 rounded-lg flex items-center gap-1 transition-colors shadow-sm ${flaggedCount > 0 ? 'bg-orange-500 hover:bg-orange-600' : 'bg-green-600 hover:bg-green-700'}`}>
-            Step 4: Audit Report →
-          </button>
+          {flaggedCount > 0 && (
+            <button onClick={() => handleTabChange(3)}
+              className="ml-4 flex-shrink-0 text-sm font-semibold text-white bg-orange-500 hover:bg-orange-600 px-3 py-1.5 rounded-lg flex items-center gap-1 transition-colors shadow-sm">
+              ⚠️ {flaggedCount} flagged — Review →
+            </button>
+          )}
         </div>
       )}
 
@@ -4023,15 +3972,15 @@ export default function Repacking() {
       ) : (
         <>
           {activeTab === 0 && <BOMTab skus={skus} refreshSkus={refreshSkus}
-            onGoToStock={skuId => { setStockPreFillSkuId(skuId); handleTabChange(1) }}
+            onGoToStock={skuId => { setStockPreFillSkuId(skuId); handleTabChange(2) }}
             onSaved={() => setBomCount(c => c + 1)}
             bulkStocks={bulkStocks}
           />}
-          {activeTab === 1 && <PurchasesTab skus={skus} onStartPacking={handleStartPacking}
+          {activeTab === 1 && <RunsTab skus={skus} landedCosts={landedCosts} preFill={runPreFill} onPreFillConsumed={() => setRunPreFill(null)} />}
+          {activeTab === 2 && <PurchasesTab skus={skus}
             preFillSkuId={stockPreFillSkuId}
             onSaved={() => setPurchaseCount(c => c + 1)}
           />}
-          {activeTab === 2 && <RunsTab skus={skus} landedCosts={landedCosts} preFill={runPreFill} onPreFillConsumed={() => setRunPreFill(null)} />}
           {activeTab === 3 && <SummaryTab />}
         </>
       )}
