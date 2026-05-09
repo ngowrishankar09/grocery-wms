@@ -561,7 +561,7 @@ function BOMTab({ skus, refreshSkus, onGoToStock, onSaved, bulkStocks = {} }) {
         <div>
           <h2 className="text-lg font-semibold text-gray-800">My Products</h2>
           <p className="text-sm text-gray-500 mt-0.5">
-            For each raw material you buy in bulk, tell us which retail pack sizes you produce from it. Do this once — the system uses it to track usage and costs automatically.
+            Link each bulk material to the retail pack sizes you produce from it — set up once, tracked automatically.
           </p>
         </div>
         <button onClick={() => openNew()} className="btn-primary flex items-center gap-1.5">
@@ -888,7 +888,7 @@ function BOMTab({ skus, refreshSkus, onGoToStock, onSaved, bulkStocks = {} }) {
         <div className="border border-gray-200 rounded-2xl overflow-hidden flex" style={{ minHeight: 440 }}>
 
           {/* ── LEFT: scrollable list of all bulk materials ── */}
-          <div className="w-56 flex-shrink-0 border-r border-gray-200 bg-gray-50/70 flex flex-col">
+          <div className="w-64 flex-shrink-0 border-r border-gray-200 bg-gray-50/70 flex flex-col">
             <div className="px-3 py-2.5 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
               <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">
                 {grouped.length} material{grouped.length !== 1 ? 's' : ''}
@@ -959,6 +959,15 @@ function BOMTab({ skus, refreshSkus, onGoToStock, onSaved, bulkStocks = {} }) {
                 )
               })}
             </div>
+            {/* Summary strip */}
+            {grouped.length > 0 && (
+              <div className="px-3 py-2 border-t border-gray-100 bg-white/60">
+                <div className="flex items-center justify-between text-[11px] text-gray-400">
+                  <span>{grouped.reduce((s, g) => s + g.outputs.length, 0)} retail product{grouped.reduce((s, g) => s + g.outputs.length, 0) !== 1 ? 's' : ''} total</span>
+                  <span className="font-medium text-gray-500">{grouped.length} material{grouped.length !== 1 ? 's' : ''}</span>
+                </div>
+              </div>
+            )}
             {/* Add material shortcut at list bottom */}
             <button type="button" onClick={() => openNew()}
               className="w-full px-3 py-2.5 text-left text-xs text-blue-600 hover:bg-blue-50 flex items-center gap-1.5 font-semibold border-t border-gray-200 transition-colors">
@@ -1097,6 +1106,7 @@ function BOMTab({ skus, refreshSkus, onGoToStock, onSaved, bulkStocks = {} }) {
                       <p className="text-xs mt-1 text-gray-400">Click "+ Add retail pack" to define what you pack from this material</p>
                     </div>
                   ) : (
+                    <>
                     <table className="w-full text-sm">
                       <thead className="bg-gray-50/50 text-xs text-gray-400 uppercase tracking-wide border-b border-gray-100 sticky top-0">
                         <tr>
@@ -1146,6 +1156,65 @@ function BOMTab({ skus, refreshSkus, onGoToStock, onSaved, bulkStocks = {} }) {
                         })}
                       </tbody>
                     </table>
+
+                    {/* ── Yield-per-sack summary ── */}
+                    {(() => {
+                      const bulkSku = skus.find(s => String(s.id) === String(selectedGroup.bulk_id))
+                      if (!bulkSku?.unit_weight) return null
+                      const toKg = (w, uom) => {
+                        const u = (uom || 'g').toLowerCase()
+                        if (u === 'kg')  return w
+                        if (u === 'g')   return w / 1000
+                        if (u === 'lbs') return w * 0.453592
+                        if (u === 'oz')  return w * 0.0283495
+                        return w / 1000
+                      }
+                      const sackKg = toKg(bulkSku.unit_weight, bulkSku.unit_weight_uom)
+                      if (!sackKg) return null
+                      return (
+                        <div className="border-t border-gray-100 bg-gradient-to-b from-gray-50/60 to-white px-5 py-4">
+                          <div className="flex items-center gap-2 mb-3">
+                            <span className="text-[11px] font-bold text-gray-400 uppercase tracking-wide">
+                              Yield per sack
+                            </span>
+                            <span className="text-[11px] bg-blue-50 text-blue-600 border border-blue-100 px-2 py-0.5 rounded-full font-semibold">
+                              {sackKg % 1 === 0 ? sackKg : sackKg.toFixed(1)} kg bag
+                            </span>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                            {selectedGroup.outputs.map(b => {
+                              const qtyKg = (() => {
+                                if (!b.qty_per_unit) return null
+                                const u = (b.unit || 'kg').toLowerCase()
+                                return toKg(parseFloat(b.qty_per_unit), u)
+                              })()
+                              const casesPerSack = qtyKg && qtyKg > 0
+                                ? Math.floor(sackKg / qtyKg * (1 - (b.waste_pct_allowed || 0) / 100))
+                                : null
+                              const kgPerCase = qtyKg ? qtyKg.toFixed(2) : '—'
+                              return (
+                                <div key={b.id} className="bg-white border border-gray-200 rounded-xl px-3.5 py-3 flex flex-col gap-0.5 shadow-sm hover:border-blue-200 transition-colors">
+                                  <p className="text-xs font-semibold text-gray-700 truncate leading-tight">{b.output_sku_name}</p>
+                                  <p className="text-[11px] text-gray-400">{kgPerCase} kg / case</p>
+                                  {casesPerSack != null ? (
+                                    <div className="mt-1.5 flex items-baseline gap-1">
+                                      <span className="text-2xl font-bold text-blue-700 leading-none">~{casesPerSack.toLocaleString()}</span>
+                                      <span className="text-xs text-gray-500 font-medium">cases</span>
+                                    </div>
+                                  ) : (
+                                    <p className="text-xs text-gray-300 mt-1">set kg/case to calculate</p>
+                                  )}
+                                </div>
+                              )
+                            })}
+                          </div>
+                          <p className="text-[11px] text-gray-400 mt-2.5 italic">
+                            Estimated output per sack after waste allowance — useful for production planning.
+                          </p>
+                        </div>
+                      )
+                    })()}
+                    </>
                   )}
                 </div>
               </>
