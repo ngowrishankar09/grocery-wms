@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { transferAPI, receivingAPI } from '../api/client'
 import { useT } from '../i18n/translations'
 import { ArrowRight, Lightbulb, Plus, Trash2 } from 'lucide-react'
+import { showToast, errMsg } from '../utils/toast'
 
 const today = () => new Date().toISOString().split('T')[0]
 
@@ -34,7 +35,7 @@ export default function Transfers({ lang }) {
 
   const handleSubmit = async () => {
     const valid = items.filter(i => i.batch_id && i.cases)
-    if (!valid.length) return alert('Add at least one item')
+    if (!valid.length) return showToast('Add at least one item', 'warning')
     try {
       await transferAPI.create({
         from_warehouse: fromWH,
@@ -44,8 +45,9 @@ export default function Transfers({ lang }) {
         items: valid.map(i => ({ batch_id: parseInt(i.batch_id), cases_to_move: parseInt(i.cases) }))
       })
       setShowForm(false); setItems([{ batch_id: '', cases: '' }]); load()
+      showToast('Transfer saved')
     } catch (e) {
-      alert('Error: ' + (e.response?.data?.detail || e.message))
+      showToast(errMsg(e, 'Transfer failed'), 'error')
     }
   }
 

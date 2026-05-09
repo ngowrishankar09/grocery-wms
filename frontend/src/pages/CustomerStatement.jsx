@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { showToast, errMsg } from '../utils/toast'
 import { Printer, Download, FileText, Calendar, DollarSign } from 'lucide-react'
 import { invoiceAPI, customerAPI } from '../api/client'
 
@@ -23,7 +24,7 @@ export default function CustomerStatement() {
     try {
       const r = await invoiceAPI.statement(selectedCustomer, { from_date: fromDate, to_date: toDate })
       setStatement(r.data)
-    } catch {}
+    } catch (e) { showToast(errMsg(e), 'error') }
     setLoading(false)
   }
 

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { showToast, errMsg } from '../utils/toast'
 import api from '../api/client'
 import {
   MapPin, Plus, Search, Package, RefreshCw, ChevronDown, ChevronRight,
@@ -288,7 +289,7 @@ export default function BinLocations() {
     try {
       const r = await API.get('/bin-locations?active_only=true')
       setBins(r.data)
-    } catch {}
+    } catch (e) { showToast(errMsg(e), 'error') }
     setLoading(false)
   }, [])
 
@@ -300,7 +301,7 @@ export default function BinLocations() {
       await API.delete(`/bin-locations/${bin.id}`)
       load()
     } catch (e) {
-      alert(e.response?.data?.detail || 'Failed to deactivate bin')
+      showToast(errMsg(e, 'Failed to deactivate bin'), 'error')
     }
   }
 

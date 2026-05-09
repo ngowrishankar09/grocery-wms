@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { showToast, errMsg } from '../utils/toast'
 import { inventoryAPI, skuAPI, uploadAPI, receivingAPI, warehouseTaskAPI } from '../api/client'
 import api from '../api/client'
 import { useT } from '../i18n/translations'
@@ -35,7 +36,7 @@ function BinCell({ inventoryId, currentBin, onAssigned }) {
     try {
       const r = await API.get('/bin-locations?active_only=true')
       setBins(r.data)
-    } catch {}
+    } catch (e) { showToast(errMsg(e, 'Could not load bin locations'), 'error') }
   }
 
   const assign = async (binId) => {
@@ -44,7 +45,7 @@ function BinCell({ inventoryId, currentBin, onAssigned }) {
     try {
       await API.post('/bin-locations/assign', { inventory_id: inventoryId, bin_location_id: binId })
       onAssigned()
-    } catch {}
+    } catch (e) { showToast(errMsg(e, 'Failed to assign bin'), 'error') }
     setSaving(false)
     setEditing(false)
   }
@@ -202,7 +203,7 @@ export default function Inventory({ lang }) {
       setStockModal(null)
       load()
     } catch (e) {
-      alert(e?.response?.data?.detail || 'Error')
+      showToast(errMsg(e, 'Error'), 'error')
     }
     setStockSaving(false)
   }

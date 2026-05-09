@@ -6,6 +6,7 @@ import {
   CheckCircle2, X, Factory, Scale, DollarSign, Edit2, Save,
   ChevronDown, Play, ExternalLink,
 } from 'lucide-react'
+import { showToast, errMsg } from '../utils/toast'
 
 // ── Formatting helpers ────────────────────────────────────────
 const fmt$ = (v) => `$${(v ?? 0).toFixed(2)}`
@@ -325,7 +326,7 @@ function BOMTab({ skus, refreshSkus, onGoToStock, onSaved, bulkStocks = {} }) {
       await refreshSkus()
       setInlineBulkId(null)
     } catch (err) {
-      alert('Could not save: ' + (err.response?.data?.detail || err.message))
+      showToast(errMsg(err, 'Could not save'), 'error')
     } finally { setInlineBulkSaving(false) }
   }
 
@@ -531,7 +532,7 @@ function BOMTab({ skus, refreshSkus, onGoToStock, onSaved, bulkStocks = {} }) {
   const handleDelete = async (id) => {
     if (!window.confirm('Remove this retail product from this bulk material?')) return
     try { await repackingAPI.deleteBOM(id); load() }
-    catch (e) { alert(e.response?.data?.detail || 'Failed to delete') }
+    catch (e) { showToast(errMsg(e, 'Failed to delete'), 'error') }
   }
 
   // SKUs already saved in the BOM for the selected bulk (for duplicate warnings)
@@ -1500,7 +1501,7 @@ function PurchasesTab({ skus, preFillSkuId, onSaved }) {
         return { ...f, cost_lines: cl }
       })
     } catch (e) {
-      alert(`Could not fetch live ${currency}/USD rate. Please enter manually.`)
+      showToast(`Could not fetch live ${currency}/USD rate. Please enter manually.`, 'warning')
     } finally { setFetchingFx(null) }
   }
 
@@ -1707,7 +1708,7 @@ function PurchasesTab({ skus, preFillSkuId, onSaved }) {
     if (!window.confirm('Delete this purchase batch? All associated cost records will also be deleted.')) return
     setDeleting(id)
     try { await repackingAPI.deletePurchase(id); load() }
-    catch (e) { alert(e.response?.data?.detail || 'Failed to delete') }
+    catch (e) { showToast(errMsg(e, 'Failed to delete'), 'error') }
     finally { setDeleting(null) }
   }
 
@@ -2326,7 +2327,7 @@ function OperationalCostsCard({ runDetail, onSaved }) {
       setCostLines(cl => {
         const n = [...cl]; n[idx] = { ...n[idx], fx_rate_to_usd: String(res.data.rate) }; return n
       })
-    } catch { alert(`Could not fetch live ${currency}/USD rate.`) }
+    } catch { showToast(`Could not fetch live ${currency}/USD rate.`, 'warning') }
     finally { setFetchingFx(null) }
   }
 
@@ -2340,7 +2341,7 @@ function OperationalCostsCard({ runDetail, onSaved }) {
     try {
       const res = await repackingAPI.costSummary(runDetail.id)
       setSummary(res.data)
-    } catch {}
+    } catch (e) { showToast(errMsg(e, 'Could not load cost summary'), 'error') }
     finally { setLoadingSummary(false) }
   }, [runDetail.id, runDetail.status])
 
@@ -2676,7 +2677,7 @@ function RunsTab({ skus, landedCosts, preFill, onPreFillConsumed }) {
     try {
       await repackingAPI.removeOutput(runDetail.id, skuId)
       loadDetail(runDetail.id)
-    } catch (e) { alert(e.response?.data?.detail || 'Failed to remove output') }
+    } catch (e) { showToast(errMsg(e, 'Failed to remove output'), 'error') }
   }
 
   const handleAddBulk = async (e) => {
@@ -2705,7 +2706,7 @@ function RunsTab({ skus, landedCosts, preFill, onPreFillConsumed }) {
       setRunDetail(res.data)
       setShowClose(false)
       loadRuns()
-    } catch (e) { alert(e.response?.data?.detail || 'Failed to reopen run') }
+    } catch (e) { showToast(errMsg(e, 'Failed to reopen run'), 'error') }
   }
 
   const handleDeleteRun = async () => {
@@ -2714,7 +2715,7 @@ function RunsTab({ skus, landedCosts, preFill, onPreFillConsumed }) {
       await repackingAPI.deleteRun(runDetail.id)
       setRunDetail(null)
       loadRuns()
-    } catch (e) { alert(e.response?.data?.detail || 'Failed to delete run') }
+    } catch (e) { showToast(errMsg(e, 'Failed to delete run'), 'error') }
   }
 
   const handleCloseRun = async (e) => {
@@ -3909,7 +3910,7 @@ export default function Repacking() {
       const res = await skuAPI.list({ lean: true })
       const items = Array.isArray(res.data) ? res.data : (res.data?.items || res.data?.skus || [])
       setSkus(items)
-    } catch {}
+    } catch (e) { showToast(errMsg(e, 'Could not refresh SKUs'), 'error') }
   }
 
   const handleTabChange = async (i) => {
@@ -3918,7 +3919,7 @@ export default function Repacking() {
       try {
         const res = await repackingAPI.listLandedCosts()
         setLandedCosts(Array.isArray(res.data) ? res.data : [])
-      } catch {}
+      } catch {} // best-effort prefetch — tab still renders without landed costs
     }
   }
 
@@ -3927,7 +3928,7 @@ export default function Repacking() {
     try {
       const res = await repackingAPI.listLandedCosts()
       setLandedCosts(Array.isArray(res.data) ? res.data : [])
-    } catch {}
+    } catch {} // best-effort prefetch
     setRunPreFill({ landed_cost_id: landedCostId, bulk_sku_id: bulkSkuId, batchRef, bulkSkuName })
     setActiveTab(1)
   }

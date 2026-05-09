@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Search, AlertTriangle, ArrowRight, ArrowLeft, Package, RotateCcw, CheckCircle, RefreshCw } from 'lucide-react'
 import { traceabilityAPI } from '../api/client'
+import { showToast, errMsg } from '../utils/toast'
 
 const TABS = ['Forward Trace', 'Backward Trace', 'Recall Management']
 
@@ -24,7 +25,7 @@ export default function Traceability() {
     try {
       const r = await traceabilityAPI.listRecalls()
       setRecalls(r.data)
-    } catch {}
+    } catch (e) { showToast(errMsg(e, 'Could not load recalls'), 'error') }
   }
 
   const doSearch = async () => {
@@ -33,7 +34,7 @@ export default function Traceability() {
     try {
       const r = await traceabilityAPI.search(searchQ)
       setSearchResults(r.data)
-    } catch { setSearchResults([]) }
+    } catch { setSearchResults([]); showToast('Search failed', 'error') }
     setLoading(false)
   }
 
@@ -59,14 +60,16 @@ export default function Traceability() {
       setRecallBatch(null)
       setRecallReason('')
       loadRecalls()
-    } catch {}
+      showToast('Recall issued')
+    } catch (e) { showToast(errMsg(e, 'Failed to issue recall'), 'error') }
   }
 
   const undoRecall = async (batchCode) => {
     try {
       await traceabilityAPI.undoRecall(batchCode)
       loadRecalls()
-    } catch {}
+      showToast('Recall reversed')
+    } catch (e) { showToast(errMsg(e, 'Failed to undo recall'), 'error') }
   }
 
   return (

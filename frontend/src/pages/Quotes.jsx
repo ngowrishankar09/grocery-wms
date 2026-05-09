@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { FileText, Plus, ArrowRight, CheckCircle, XCircle, Send, RefreshCw, X } from 'lucide-react'
 import { quoteAPI, customerAPI } from '../api/client'
+import { showToast, errMsg } from '../utils/toast'
 
 const STATUS_STYLES = {
   Draft:     'bg-gray-100 text-gray-600',
@@ -46,7 +47,7 @@ export default function Quotes() {
       const params = (status && status !== 'All') ? { status } : {}
       const r = await quoteAPI.list(params)
       setQuotes(r.data || [])
-    } catch {}
+    } catch (e) { showToast(errMsg(e), 'error') }
     setLoading(false)
   }
 
@@ -77,13 +78,13 @@ export default function Quotes() {
       setShowCreate(false)
       setForm(BLANK_FORM)
       load(statusTab)
-    } catch (e) { alert(e.response?.data?.detail || 'Error creating quote') }
+    } catch (e) { showToast(errMsg(e, 'Error creating quote'), 'error') }
     setSaving(false)
   }
 
   const updateStatus = async (id, status) => {
     try { await quoteAPI.updateStatus(id, status); load(statusTab) }
-    catch (e) { alert(e.response?.data?.detail || 'Error updating status') }
+    catch (e) { showToast(errMsg(e, 'Error updating status'), 'error') }
   }
 
   const convertToOrder = async (quote) => {
@@ -92,7 +93,7 @@ export default function Quotes() {
       const r = await quoteAPI.convert(quote.id)
       setConvertModal({ quote, orderNumber: r.data?.order_number || r.data?.id })
       load(statusTab)
-    } catch (e) { alert(e.response?.data?.detail || 'Error converting quote') }
+    } catch (e) { showToast(errMsg(e, 'Error converting quote'), 'error') }
     setConverting(false)
   }
 

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Plus, Truck, Package, CheckCircle, Clock, X, Edit, Trash2 } from 'lucide-react'
 import { asnAPI } from '../api/client'
+import { showToast, errMsg } from '../utils/toast'
 
 const STATUSES = ['Pending', 'In Transit', 'Arrived', 'Received']
 const STATUS_STYLES = {
@@ -28,7 +29,7 @@ export default function SupplierASN() {
     try {
       const r = await asnAPI.list()
       setAsns(r.data)
-    } catch {}
+    } catch (e) { showToast(errMsg(e), 'error') }
     setLoading(false)
   }
 
@@ -60,7 +61,7 @@ export default function SupplierASN() {
       else await asnAPI.create(payload)
       setShowModal(false)
       loadASNs()
-    } catch {}
+    } catch (e) { showToast(errMsg(e), 'error') }
   }
 
   const deleteASN = async (id) => {

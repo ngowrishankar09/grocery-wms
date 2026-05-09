@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { settingsAPI, vendorAPI, emailAPI } from '../api/client'
+import { showToast, errMsg } from '../utils/toast'
 import { useT } from '../i18n/translations'
 import { printInvoice, DUMMY_INVOICE, DUMMY_COMPANY } from '../utils/invoiceTemplates'
 import {
@@ -89,7 +90,7 @@ function WarehouseSection() {
           await settingsAPI.deleteWarehouse(wh.id)
           setConfirm(null); load()
         } catch (e) {
-          alert(e.response?.data?.detail || e.message)
+          showToast(errMsg(e), 'error')
           setConfirm(null)
         }
       },
@@ -191,14 +192,14 @@ function VendorSection() {
   useEffect(() => { load() }, [])
 
   const handleSave = async () => {
-    if (!form.name) return alert('Vendor name required')
+    if (!form.name) return showToast('Vendor name required', 'error')
     try {
       if (editId) await vendorAPI.update(editId, form)
       else await vendorAPI.create(form)
       setShowForm(false); setEditId(null)
       setForm({ name: '', contact_person: '', phone: '', email: '', lead_time_days: 7, notes: '' })
       load()
-    } catch (e) { alert(e.response?.data?.detail || e.message) }
+    } catch (e) { showToast(errMsg(e), 'error') }
   }
 
   const handleDelete = (v) => {
@@ -209,7 +210,7 @@ function VendorSection() {
           await settingsAPI.deleteVendor(v.id)
           setConfirm(null); load()
         } catch (e) {
-          alert(e.response?.data?.detail || e.message)
+          showToast(errMsg(e), 'error')
           setConfirm(null)
         }
       },
@@ -300,12 +301,12 @@ function CategorySection() {
     try {
       await settingsAPI.updateCategory(id, { name: editName.trim() })
       setEditId(null); load()
-    } catch (e) { alert(e.response?.data?.detail || e.message) }
+    } catch (e) { showToast(errMsg(e), 'error') }
   }
 
   const handleDelete = (cat) => {
     if (cat.sku_count > 0) {
-      alert(`Cannot delete "${cat.name}" — ${cat.sku_count} SKU(s) use this category. Reassign them first.`)
+      showToast(`Cannot delete "${cat.name}" — ${cat.sku_count} SKU(s) use this category. Reassign them first.`, 'error')
       return
     }
     setConfirm({
@@ -314,7 +315,7 @@ function CategorySection() {
         try {
           await settingsAPI.deleteCategory(cat.id)
           setConfirm(null); load()
-        } catch (e) { alert(e.response?.data?.detail || e.message); setConfirm(null) }
+        } catch (e) { showToast(errMsg(e), 'error'); setConfirm(null) }
       },
       onCancel: () => setConfirm(null)
     })
@@ -539,7 +540,7 @@ function CompanySection() {
                 onChange={e => {
                   const file = e.target.files[0]
                   if (!file) return
-                  if (file.size > 2 * 1024 * 1024) { alert('Image must be under 2MB'); return }
+                  if (file.size > 2 * 1024 * 1024) { showToast('Image must be under 2MB', 'error'); return }
                   const reader = new FileReader()
                   reader.onload = ev => set('logo_base64', ev.target.result)
                   reader.readAsDataURL(file)

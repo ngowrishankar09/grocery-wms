@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { vendorAPI } from '../api/client'
 import { useT } from '../i18n/translations'
 import { Plus, Edit2 } from 'lucide-react'
+import { showToast, errMsg } from '../utils/toast'
 
 export default function Vendors({ lang }) {
   const t = useT(lang)
@@ -14,14 +15,15 @@ export default function Vendors({ lang }) {
   useEffect(() => { load() }, [])
 
   const handleSubmit = async () => {
-    if (!form.name) return alert('Vendor name required')
+    if (!form.name) return showToast('Vendor name required', 'warning')
     try {
       if (editId) await vendorAPI.update(editId, form)
       else await vendorAPI.create(form)
       setShowForm(false); setEditId(null)
       setForm({ name: '', contact_person: '', phone: '', email: '', lead_time_days: 7, notes: '' })
       load()
-    } catch (e) { alert('Error: ' + (e.response?.data?.detail || e.message)) }
+      showToast(editId ? 'Vendor updated' : 'Vendor created')
+    } catch (e) { showToast(errMsg(e, 'Failed to save vendor'), 'error') }
   }
 
   const startEdit = (v) => { setForm(v); setEditId(v.id); setShowForm(true) }

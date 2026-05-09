@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { priceListAPI, skuAPI } from '../api/client'
 import { Tags, Plus, Pencil, Trash2, X, Search, ChevronDown, ChevronRight, DollarSign } from 'lucide-react'
+import { showToast, errMsg } from '../utils/toast'
 
 // ── Price List Form Modal ──────────────────────────────────────
 function PriceListModal({ list, onSave, onClose }) {
@@ -18,7 +19,7 @@ function PriceListModal({ list, onSave, onClose }) {
         await priceListAPI.create({ name, description: desc })
       }
       onSave()
-    } catch {}
+    } catch (e) { showToast(errMsg(e), 'error') }
     setSaving(false)
   }
 
@@ -80,7 +81,7 @@ function PriceItemsPanel({ list, skus, onSaved }) {
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)
       onSaved()
-    } catch {}
+    } catch (e) { showToast(errMsg(e), 'error') }
     setSaving(false)
   }
 

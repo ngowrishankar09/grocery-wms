@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { showToast, errMsg } from '../utils/toast'
 import { Plus, FileX, CheckCircle, XCircle, X, DollarSign, AlertTriangle } from 'lucide-react'
 import { creditNoteAPI, invoiceAPI, customerAPI } from '../api/client'
 
@@ -37,7 +38,7 @@ export default function CreditNotes() {
 
   const load = async () => {
     setLoading(true)
-    try { const r = await creditNoteAPI.list(); setNotes(r.data) } catch {}
+    try { const r = await creditNoteAPI.list(); setNotes(r.data) } catch (e) { showToast(errMsg(e), 'error') }
     setLoading(false)
   }
 
@@ -61,7 +62,7 @@ export default function CreditNotes() {
       setShowCreate(false)
       setForm(BLANK_FORM)
       load()
-    } catch {}
+    } catch (e) { showToast(errMsg(e), 'error') }
   }
 
   const doApply = async () => {
@@ -70,7 +71,7 @@ export default function CreditNotes() {
       await creditNoteAPI.apply(applyModal.cn.id, { invoice_id: parseInt(applyInvoiceId), amount: parseFloat(applyAmount) })
       setApplyModal(null); setApplyInvoiceId(''); setApplyAmount('')
       load()
-    } catch (e) { alert(e.response?.data?.detail || 'Error applying credit note') }
+    } catch (e) { showToast(errMsg(e, 'Error applying credit note'), 'error') }
   }
 
   const doVoid = async (id) => {

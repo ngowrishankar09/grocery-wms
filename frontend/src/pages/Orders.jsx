@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { orderAPI, skuAPI, customerAPI, invoiceAPI } from '../api/client'
 import { useT } from '../i18n/translations'
+import { showToast, errMsg } from '../utils/toast'
 import {
   Plus, Truck, Search, ShoppingCart,
   Printer, Package, Minus, X, Smartphone, Eye, Edit2, Check, User, ChevronRight,
@@ -124,7 +125,7 @@ const pickStatusBadge = (status) => {
 
 function printSalesOrder(detail) {
   const w = window.open('', '_blank', 'width=820,height=620')
-  if (!w) return alert('Allow popups to print the sales order')
+  if (!w) return showToast('Allow popups to print the sales order', 'error')
   const rows = detail.items.map(i => `
     <tr>
       <td>${i.sku_code || ''}</td>
@@ -209,8 +210,8 @@ function CatalogModal({ skus, customers, mode, orderNumber, initialCart = {}, in
   const cartCount = Object.values(cart).reduce((a, b) => a + b, 0)
 
   const handleSubmit = async () => {
-    if (!storeName.trim()) return alert('Enter store name')
-    if (!cartItems.length) return alert('Add at least one product')
+    if (!storeName.trim()) return showToast('Enter store name', 'error')
+    if (!cartItems.length) return showToast('Add at least one product', 'error')
     setPlacing(true)
     try {
       await onSubmit({
@@ -226,7 +227,7 @@ function CatalogModal({ skus, customers, mode, orderNumber, initialCart = {}, in
         })),
       })
     } catch (e) {
-      alert('Error: ' + (e.response?.data?.detail || e.message))
+      showToast(errMsg(e, 'Error placing order'), 'error')
       setPlacing(false)
     }
   }
@@ -903,7 +904,7 @@ export default function Orders({ lang }) {
       const r = await orderAPI.get(orderId)
       setDetailData(prev => ({ ...prev, [orderId]: r.data }))
     } catch (e) {
-      alert('Error: ' + (e.response?.data?.detail || e.message))
+      showToast(errMsg(e, 'Error dispatching order'), 'error')
     }
     setDispatching(false)
     setDispatchConfirmId(null)
@@ -922,7 +923,7 @@ export default function Orders({ lang }) {
         const r2 = await orderAPI.get(orderId)
         setDetailData(prev => ({ ...prev, [orderId]: r2.data }))
       } else {
-        alert('Error creating invoice: ' + msg)
+        showToast(errMsg(e, 'Error creating invoice'), 'error')
       }
     }
     setInvoiceCreating(false)
@@ -979,7 +980,7 @@ export default function Orders({ lang }) {
       setSendPickingModal(null)
       setPickerInput('')
     } catch (e) {
-      alert('Error: ' + (e.response?.data?.detail || e.message))
+      showToast(errMsg(e, 'Error sending to picking'), 'error')
     } finally {
       setPickingSending(false)
     }

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { showToast, errMsg } from '../utils/toast'
 import { orderAPI } from '../api/client'
 import {
   CheckCircle2, Circle, ScanLine, Package, AlertTriangle,
@@ -183,7 +184,7 @@ function StartScreen({ order, onBack, onStart }) {
         onStart(pickerName.trim(), res.data.started_at)
       }
     } catch (e) {
-      alert(e?.response?.data?.detail || 'Error starting picking')
+      showToast(errMsg(e, 'Error starting picking'), 'error')
       setStarting(false)
     }
   }
@@ -322,7 +323,7 @@ function PickSession({ order, pickerName, startedAt, onBack, onFinish }) {
       const res = await orderAPI.endPicking(order.id, actualPicks)
       onFinish(res.data.duration_seconds, actualPicks, items)
     } catch (e) {
-      alert(e?.response?.data?.detail || 'Error')
+      showToast(errMsg(e, 'Error'), 'error')
       setEnding(false)
     }
   }

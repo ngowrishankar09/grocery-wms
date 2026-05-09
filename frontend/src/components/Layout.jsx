@@ -3,6 +3,7 @@ import { useT } from '../i18n/translations'
 import { useEffect, useState, useRef } from 'react'
 import { notificationsAPI } from '../api/client'
 import { useAuth, ROLE_NAV } from '../context/AuthContext'
+import ToastContainer from './ToastContainer'
 import {
   LayoutDashboard, Package, Truck, ShoppingCart,
   Warehouse, ArrowLeftRight, TrendingUp, Users, Globe, Settings, SendHorizonal,
@@ -557,6 +558,7 @@ export default function Layout({ children, lang, setLang }) {
           )}
         </main>
       </div>
+      <ToastContainer />
     </div>
   )
 }

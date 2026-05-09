@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { receivingAPI, skuAPI, uploadAPI } from '../api/client'
 import { useT } from '../i18n/translations'
+import { showToast, errMsg } from '../utils/toast'
 import { Plus, Trash2, CheckCircle, Camera, FileText, X, AlertCircle, Search } from 'lucide-react'
 import BarcodeScanner from '../components/BarcodeScanner'
 
@@ -31,12 +32,12 @@ function QuickSKUModal({ barcode, onSave, onClose }) {
   }, [])
 
   const handleSave = async () => {
-    if (!form.sku_code || !form.product_name) return alert('SKU code and product name required')
+    if (!form.sku_code || !form.product_name) return showToast('SKU code and product name required', 'error')
     try {
       const r = await skuAPI.create({ ...form, vendor_id: form.vendor_id ? parseInt(form.vendor_id) : null })
       onSave(r.data)
     } catch (e) {
-      alert('Error: ' + (e.response?.data?.detail || e.message))
+      showToast(errMsg(e), 'error')
     }
   }
 
@@ -107,7 +108,7 @@ function PDFReviewModal({ pdfData, skus, onApply, onClose }) {
 
   const handleApply = () => {
     const items = selected.filter(i => i.selected && i.sku_id && i.cases)
-    if (!items.length) return alert('Select at least one item')
+    if (!items.length) return showToast('Select at least one item', 'error')
     onApply(items)
   }
 
@@ -264,7 +265,7 @@ export default function Receiving({ lang }) {
       const r = await uploadAPI.parsePDF(file)
       setPdfData(r.data)
     } catch (err) {
-      alert('PDF parsing failed: ' + (err.response?.data?.detail || err.message))
+      showToast(errMsg(err, 'PDF parsing failed'), 'error')
     }
     setPdfLoading(false)
     e.target.value = ''
@@ -295,7 +296,7 @@ export default function Receiving({ lang }) {
 
   const handleSubmit = async () => {
     const validItems = items.filter(i => i.sku_id && i.cases)
-    if (!validItems.length) return alert('Add at least one item with a product and case count')
+    if (!validItems.length) return showToast('Add at least one item with a product and case count', 'error')
     setSubmitting(true)
     try {
       await receivingAPI.receive({
@@ -314,7 +315,7 @@ export default function Receiving({ lang }) {
       receivingAPI.history().then(r => setHistory(r.data))
       skuAPI.list().then(r => setSkus(r.data))
     } catch (e) {
-      alert('Error: ' + (e.response?.data?.detail || e.message))
+      showToast(errMsg(e, 'Error submitting receiving'), 'error')
     }
     setSubmitting(false)
   }

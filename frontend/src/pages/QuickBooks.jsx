@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import api from '../api/client'
+import { showToast, errMsg } from '../utils/toast'
 import {
   CheckCircle, XCircle, RefreshCw, Link, Link2Off,
   ChevronDown, ChevronRight, ExternalLink, AlertTriangle,
@@ -274,7 +275,7 @@ function SyncLog() {
   const load = async () => {
     setLoading(true)
     try { const r = await API.get('/quickbooks/sync/logs?limit=50'); setLogs(r.data) }
-    catch {}
+    catch (e) { showToast(errMsg(e), 'error') }
     setLoading(false)
   }
 
@@ -361,7 +362,7 @@ export default function QuickBooks() {
     try {
       const r = await API.get('/quickbooks/status')
       setStatus(r.data)
-    } catch {}
+    } catch (e) { showToast(errMsg(e), 'error') }
     setLoading(false)
   }, [])
 
@@ -384,7 +385,7 @@ export default function QuickBooks() {
       const r = await API.get('/quickbooks/auth-url')
       window.location.href = r.data.auth_url  // full redirect to Intuit
     } catch (e) {
-      alert(e.response?.data?.detail || 'Could not generate auth URL. Check credentials.')
+      showToast(errMsg(e, 'Could not generate auth URL. Check credentials.'), 'error')
       setConnecting(false)
     }
   }
@@ -395,14 +396,14 @@ export default function QuickBooks() {
     try {
       await API.delete('/quickbooks/disconnect')
       load()
-    } catch {}
+    } catch (e) { showToast(errMsg(e), 'error') }
     setDisconnecting(false)
   }
 
   const syncAll = async () => {
     setSyncingAll(true)
     try { await API.post('/quickbooks/sync/all') }
-    catch {}
+    catch (e) { showToast(errMsg(e), 'error') }
     setSyncingAll(false)
     load()
   }

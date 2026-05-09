@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Receipt, Building2, Clock, CheckCircle, AlertTriangle, DollarSign, Plus, X, ChevronDown } from 'lucide-react'
 import { vendorBillAPI, purchaseOrderAPI } from '../api/client'
+import { showToast, errMsg } from '../utils/toast'
 
 const STATUS_STYLES = {
   Draft:    'bg-gray-100 text-gray-600',
@@ -56,12 +57,12 @@ export default function VendorBills() {
       const params = (status && status !== 'All') ? { status } : {}
       const r = await vendorBillAPI.list(params)
       setBills(r.data || [])
-    } catch {}
+    } catch (e) { showToast(errMsg(e, 'Could not load bills'), 'error') }
     setLoading(false)
   }
 
   const loadAging = async () => {
-    try { const r = await vendorBillAPI.aging(); setAging(r.data) } catch {}
+    try { const r = await vendorBillAPI.aging(); setAging(r.data) } catch {} // non-critical sidebar stat
   }
 
   const changeTab = (tab) => {
@@ -92,7 +93,8 @@ export default function VendorBills() {
       setShowCreate(false)
       setForm(BLANK_FORM)
       load(statusTab)
-    } catch (e) { alert(e.response?.data?.detail || 'Error creating bill') }
+      showToast('Bill created')
+    } catch (e) { showToast(errMsg(e, 'Error creating bill'), 'error') }
     setSaving(false)
   }
 
@@ -100,11 +102,13 @@ export default function VendorBills() {
     try {
       await vendorBillAPI.fromPO(poId)
       load(statusTab)
-    } catch (e) { alert(e.response?.data?.detail || 'Error creating bill from PO') }
+      showToast('Bill created from PO')
+    } catch (e) { showToast(errMsg(e, 'Error creating bill from PO'), 'error') }
   }
 
   const updateStatus = async (id, status) => {
-    try { await vendorBillAPI.updateStatus(id, status); load(statusTab) } catch (e) { alert(e.response?.data?.detail || 'Error') }
+    try { await vendorBillAPI.updateStatus(id, status); load(statusTab); showToast('Status updated') }
+    catch (e) { showToast(errMsg(e, 'Failed to update status'), 'error') }
   }
 
   const recordPayment = async () => {
@@ -118,7 +122,8 @@ export default function VendorBills() {
       setPaymentModal(null)
       setPayForm(BLANK_PAYMENT)
       load(statusTab)
-    } catch (e) { alert(e.response?.data?.detail || 'Error recording payment') }
+      showToast('Payment recorded')
+    } catch (e) { showToast(errMsg(e, 'Error recording payment'), 'error') }
     setSaving(false)
   }
 

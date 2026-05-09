@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { sheetsAPI } from '../api/client'
+import { showToast, errMsg } from '../utils/toast'
 import {
   Plus, Trash2, Download, RefreshCw, Edit2,
   FileSpreadsheet, MoreHorizontal, Wifi, WifiOff, BookOpen,
@@ -1712,7 +1713,8 @@ function WorkbookHome({ onOpen }) {
 
   const load = async () => {
     setLoading(true)
-    try { const r = await sheetsAPI.listWorkbooks(); setWorkbooks(r.data) } catch {}
+    try { const r = await sheetsAPI.listWorkbooks(); setWorkbooks(r.data) }
+    catch (e) { showToast(errMsg(e, 'Could not load workbooks'), 'error') }
     setLoading(false)
   }
   useEffect(() => { load() }, [])

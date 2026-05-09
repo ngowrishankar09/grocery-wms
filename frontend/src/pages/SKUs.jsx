@@ -4,6 +4,7 @@ import api from '../api/client'
 import { useT } from '../i18n/translations'
 import { Plus, Search, Edit2, Trash2, AlertTriangle, Check, X, SlidersHorizontal, Info, Upload, FileSpreadsheet, FileText, Image, Printer, Tag, MapPin, ExternalLink } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
+import { showToast as globalToast, errMsg } from '../utils/toast'
 
 const API = api  // alias — bin-location calls go through the auth-aware client
 
@@ -48,7 +49,7 @@ function AdjustModal({ row, onClose, onSaved }) {
   const delta = newQty !== '' && !isNaN(parseInt(newQty)) ? parseInt(newQty) - row.current : null
 
   const handleSave = async () => {
-    if (newQty === '' || isNaN(parseInt(newQty))) return alert('Enter a valid quantity')
+    if (newQty === '' || isNaN(parseInt(newQty))) return globalToast('Enter a valid quantity', 'warning')
     setSaving(true)
     try {
       await settingsAPI.adjustInventory({
@@ -60,7 +61,7 @@ function AdjustModal({ row, onClose, onSaved }) {
       })
       onSaved()
     } catch (e) {
-      alert(e.response?.data?.detail || e.message)
+      globalToast(errMsg(e, 'Adjustment failed'), 'error')
     }
     setSaving(false)
   }
@@ -211,7 +212,7 @@ function BulkUploadModal({ categories, onClose, onImported }) {
 
   const handleConfirm = async () => {
     const toCreate = rows.filter(r => r._selected && (r.status !== 'duplicate' || !skipDuplicates))
-    if (toCreate.length === 0) return alert('No new SKUs selected to import.')
+    if (toCreate.length === 0) return globalToast('No new SKUs selected to import.', 'warning')
     setLoading(true)
     try {
       const res = await uploadAPI.bulkSKUConfirm(
@@ -599,7 +600,7 @@ function SKUFormModal({ form, editId, categories, vendors, bins, saving, onSet, 
         const r = await uploadAPI.productImage(editId, file)
         onSet('image_url', r.data.image_url)
       } catch (e) {
-        alert('Image upload failed: ' + (e.response?.data?.detail || e.message || 'Unknown error'))
+        globalToast(errMsg(e, 'Image upload failed'), 'error')
       }
       setUploading(false)
     } else {
@@ -1246,8 +1247,8 @@ export default function SKUs({ lang }) {
   const closeForm = () => { setShowForm(false); setEditId(null); setForm({ ...BLANK_FORM }); setBulkLinks([]); pendingImgFileRef.current = null }
 
   const handleSubmit = async () => {
-    if (!form.sku_code.trim()) return alert('SKU Code is required')
-    if (!form.product_name.trim()) return alert('Product Name is required')
+    if (!form.sku_code.trim()) return globalToast('SKU Code is required', 'warning')
+    if (!form.product_name.trim()) return globalToast('Product Name is required', 'warning')
 
     setSaving(true)
     const data = {
@@ -1308,12 +1309,12 @@ export default function SKUs({ lang }) {
             retail_sku_id:    l.retail_sku_id,
             local_pack_active: l.local_pack_active,
           })))
-        } catch {}
+        } catch {} // best-effort bulk link save
       }
       closeForm()
       load()
     } catch (e) {
-      alert('Error: ' + (e.response?.data?.detail || e.message))
+      globalToast(errMsg(e, 'Failed to save SKU'), 'error')
     }
     setSaving(false)
   }
@@ -1331,7 +1332,7 @@ export default function SKUs({ lang }) {
 
   const handleDelete = (sku) => {
     if (sku.total_cases > 0) {
-      alert(`Cannot delete "${sku.product_name}" — it still has ${sku.total_cases} cases in stock. Zero out the stock first.`)
+      globalToast(`Cannot delete "${sku.product_name}" — it still has ${sku.total_cases} cases in stock. Zero out the stock first.`, 'warning')
       return
     }
     setConfirm({
@@ -1343,7 +1344,7 @@ export default function SKUs({ lang }) {
           showToast(`🗑 ${sku.product_name} deleted`)
           load()
         } catch (e) {
-          alert(e.response?.data?.detail || e.message)
+          globalToast(errMsg(e, 'Failed to delete SKU'), 'error')
           setConfirm(null)
         }
       },

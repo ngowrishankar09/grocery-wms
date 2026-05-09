@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { returnsAPI, customerAPI, skuAPI } from '../api/client'
 import { Plus, Trash2, CheckCircle, XCircle, ChevronDown, ChevronUp, RotateCcw } from 'lucide-react'
+import { showToast, errMsg } from '../utils/toast'
 
 const today = () => new Date().toISOString().split('T')[0]
 
@@ -38,9 +39,9 @@ function CreateForm({ customers, skus, onCreated, onClose }) {
   }
 
   const handleSubmit = async () => {
-    if (!storeName.trim()) return alert('Enter store / customer name')
+    if (!storeName.trim()) return showToast('Enter store / customer name', 'error')
     const valid = items.filter(it => it.sku_id && it.cases_returned > 0)
-    if (!valid.length) return alert('Add at least one item with cases > 0')
+    if (!valid.length) return showToast('Add at least one item with cases > 0', 'error')
     setSaving(true)
     try {
       await returnsAPI.create({
@@ -58,7 +59,7 @@ function CreateForm({ customers, skus, onCreated, onClose }) {
       })
       onCreated()
     } catch (e) {
-      alert('Error: ' + (e.response?.data?.detail || e.message))
+      showToast(errMsg(e), 'error')
     } finally {
       setSaving(false)
     }
@@ -166,7 +167,7 @@ function AcceptModal({ ret, onDone, onClose }) {
       await returnsAPI.accept(ret.id, accepted)
       onDone()
     } catch (e) {
-      alert('Error: ' + (e.response?.data?.detail || e.message))
+      showToast(errMsg(e), 'error')
     } finally {
       setSaving(false)
     }
@@ -252,14 +253,14 @@ export default function Returns() {
 
   const handleReject = async (id) => {
     if (!confirm('Reject this return? No stock will be added.')) return
-    try { await returnsAPI.reject(id); load() }
-    catch (e) { alert('Error: ' + (e.response?.data?.detail || e.message)) }
+    try { await returnsAPI.reject(id); load(); showToast('Return rejected') }
+    catch (e) { showToast(errMsg(e, 'Failed to reject return'), 'error') }
   }
 
   const handleDelete = async (id) => {
     if (!confirm('Delete this return record?')) return
-    try { await returnsAPI.delete(id); load() }
-    catch (e) { alert('Error: ' + (e.response?.data?.detail || e.message)) }
+    try { await returnsAPI.delete(id); load(); showToast('Return deleted') }
+    catch (e) { showToast(errMsg(e, 'Failed to delete return'), 'error') }
   }
 
   const total    = returns.length

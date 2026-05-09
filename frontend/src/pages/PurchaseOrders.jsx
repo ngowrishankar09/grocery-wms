@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { purchaseOrderAPI, vendorAPI, skuAPI, emailAPI } from '../api/client'
+import { showToast as toastGlobal, errMsg } from '../utils/toast'
 import {
   ShoppingBag, Plus, Search, ChevronRight, X, Check, Truck,
   Send, Package, AlertTriangle, RefreshCw, Trash2, Edit2,
@@ -53,7 +54,7 @@ function CreatePOModal({ vendors, skus, onSave, onClose }) {
   const totalCost = items.reduce((s, i) => s + ((parseFloat(i.unit_cost) || 0) * (parseInt(i.cases_ordered) || 0)), 0)
 
   const handleSave = async () => {
-    if (!items.length) return alert('Add at least one SKU')
+    if (!items.length) return toastGlobal('Add at least one SKU', 'error')
     setSaving(true)
     try {
       await onSave({
@@ -68,7 +69,7 @@ function CreatePOModal({ vendors, skus, onSave, onClose }) {
         })),
       })
     } catch (e) {
-      alert(e.response?.data?.detail || e.message)
+      toastGlobal(errMsg(e), 'error')
     }
     setSaving(false)
   }
@@ -229,12 +230,12 @@ function ReceiveModal({ po, onSave, onClose }) {
         has_expiry:     r.has_expiry,
         expiry_date:    r.has_expiry && r.expiry_date ? r.expiry_date : null,
       }))
-    if (!items.length) return alert('Enter at least one received quantity')
+    if (!items.length) return toastGlobal('Enter at least one received quantity', 'error')
     setSaving(true)
     try {
       await onSave(items, receivedDate)
     } catch (e) {
-      alert(e.response?.data?.detail || e.message)
+      toastGlobal(errMsg(e), 'error')
     }
     setSaving(false)
   }
@@ -508,7 +509,7 @@ export default function PurchaseOrders() {
       ])
       setPos(posRes.data)
       setStats(statsRes.data)
-    } catch {}
+    } catch (e) { toastGlobal(errMsg(e), 'error') }
     setLoading(false)
   }
 

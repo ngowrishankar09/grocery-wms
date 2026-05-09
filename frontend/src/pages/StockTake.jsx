@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
 import { stockTakeAPI, settingsAPI, uploadAPI, skuAPI } from '../api/client'
+import { showToast as toastGlobal, errMsg } from '../utils/toast'
 import {
   ClipboardList, Search, Check, X, AlertTriangle,
   TrendingDown, TrendingUp, Minus, RefreshCw, Trash2, Camera
@@ -231,7 +232,7 @@ export default function StockTake() {
       setStage('count')
       setResult(null)
     } catch (e) {
-      alert(e.message)
+      toastGlobal(errMsg(e), 'error')
     }
     setLoading(false)
   }
@@ -240,7 +241,7 @@ export default function StockTake() {
     try {
       const r = await stockTakeAPI.history()
       setHistory(r.data)
-    } catch {}
+    } catch (e) { toastGlobal(errMsg(e), 'error') }
   }
 
   useEffect(() => { loadHistory() }, [])
@@ -252,7 +253,7 @@ export default function StockTake() {
   const filledRows = sheet.filter(r => r.input_count !== '' && r.input_count !== null)
 
   const handlePreview = async () => {
-    if (filledRows.length === 0) return alert('Enter counts for at least one product')
+    if (filledRows.length === 0) return toastGlobal('Enter counts for at least one product', 'error')
     setSubmitting(true)
     try {
       const items = filledRows.map(r => ({
@@ -270,7 +271,7 @@ export default function StockTake() {
       setResult(r.data)
       setStage('review')
     } catch (e) {
-      alert(e.response?.data?.detail || e.message)
+      toastGlobal(errMsg(e), 'error')
     }
     setSubmitting(false)
   }
@@ -294,7 +295,7 @@ export default function StockTake() {
       showToast('✅ Stock take applied — inventory updated')
       loadHistory()
     } catch (e) {
-      alert(e.response?.data?.detail || e.message)
+      toastGlobal(errMsg(e), 'error')
     }
     setSubmitting(false)
   }

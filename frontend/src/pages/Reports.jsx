@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { reportsAPI } from '../api/client'
+import { showToast, errMsg } from '../utils/toast'
 import {
   FileSpreadsheet, Download, RefreshCw, Package, TrendingDown,
   Calendar, AlertTriangle, ArrowDownUp, ClipboardList
@@ -89,33 +90,33 @@ export default function Reports() {
 
   const handleExport = async (key, exportFn) => {
     setExp(key, true)
-    try { await exportFn() } catch (e) { setError(e.message || 'Export failed') }
+    try { await exportFn() } catch (e) { showToast(errMsg(e, 'Export failed'), 'error') }
     setExp(key, false)
   }
 
   const loadInventory = async () => {
     setLoad('inv', true)
-    try { const r = await reportsAPI.inventorySnapshot(); setInvData(r.data) } catch {}
+    try { const r = await reportsAPI.inventorySnapshot(); setInvData(r.data) } catch (e) { showToast(errMsg(e), 'error') }
     setLoad('inv', false)
   }
   const loadDispatch = async () => {
     setLoad('disp', true)
-    try { const r = await reportsAPI.dispatchHistory(dispFrom, dispTo); setDispData(r.data) } catch {}
+    try { const r = await reportsAPI.dispatchHistory(dispFrom, dispTo); setDispData(r.data) } catch (e) { showToast(errMsg(e), 'error') }
     setLoad('disp', false)
   }
   const loadReceiving = async () => {
     setLoad('rcv', true)
-    try { const r = await reportsAPI.receivingHistory(rcvFrom, rcvTo); setRcvData(r.data) } catch {}
+    try { const r = await reportsAPI.receivingHistory(rcvFrom, rcvTo); setRcvData(r.data) } catch (e) { showToast(errMsg(e), 'error') }
     setLoad('rcv', false)
   }
   const loadLowStock = async () => {
     setLoad('low', true)
-    try { const r = await reportsAPI.lowStock(); setLowData(r.data) } catch {}
+    try { const r = await reportsAPI.lowStock(); setLowData(r.data) } catch (e) { showToast(errMsg(e), 'error') }
     setLoad('low', false)
   }
   const loadExpiry = async () => {
     setLoad('expiry', true)
-    try { const r = await reportsAPI.expiryReport(expiryDays); setExpiryData(r.data) } catch {}
+    try { const r = await reportsAPI.expiryReport(expiryDays); setExpiryData(r.data) } catch (e) { showToast(errMsg(e), 'error') }
     setLoad('expiry', false)
   }
 

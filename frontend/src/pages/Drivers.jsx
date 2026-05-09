@@ -5,6 +5,7 @@ import {
   X, Save, AlertCircle, Package, Wand2
 } from 'lucide-react'
 import { driverAPI, deliveryRunAPI, orderAPI } from '../api/client'
+import { showToast, errMsg } from '../utils/toast'
 
 // ── Status badge helpers ──────────────────────────────────────
 const DRIVER_STATUS = {
@@ -53,7 +54,7 @@ function DriverModal({ initial, onClose, onSave }) {
       if (initial?.id) await driverAPI.update(initial.id, form)
       else await driverAPI.create(form)
       onSave()
-    } catch {}
+    } catch (e) { showToast(errMsg(e), 'error') }
     setSaving(false)
   }
 
@@ -146,7 +147,7 @@ function RunModal({ drivers, onClose, onSave }) {
         notes: form.notes || null,
       })
       onSave()
-    } catch {}
+    } catch (e) { showToast(errMsg(e), 'error') }
     setSaving(false)
   }
 
@@ -223,7 +224,7 @@ function AddStopModal({ runId, onClose, onSave }) {
         delivery_notes: form.delivery_notes || null,
       })
       onSave()
-    } catch {}
+    } catch (e) { showToast(errMsg(e), 'error') }
     setSaving(false)
   }
 
@@ -393,7 +394,7 @@ function StopRow({ stop, runId, onRefresh }) {
     try {
       await deliveryRunAPI.updateStop(runId, stop.id, { status })
       onRefresh()
-    } catch {}
+    } catch (e) { showToast(errMsg(e), 'error') }
     setUpdating(false)
   }
 
@@ -455,12 +456,12 @@ function RunCard({ run, drivers, onRefresh }) {
 
   const handleStart = async () => {
     setActing(true)
-    try { await deliveryRunAPI.start(run.id); onRefresh() } catch {}
+    try { await deliveryRunAPI.start(run.id); onRefresh() } catch (e) { showToast(errMsg(e), 'error') }
     setActing(false)
   }
   const handleComplete = async () => {
     setActing(true)
-    try { await deliveryRunAPI.complete(run.id); onRefresh() } catch {}
+    try { await deliveryRunAPI.complete(run.id); onRefresh() } catch (e) { showToast(errMsg(e), 'error') }
     setActing(false)
   }
   const handleDelete = async () => {
@@ -624,7 +625,7 @@ function RunsTab({ drivers, onRefresh }) {
       const params = filterDate ? { run_date: filterDate } : {}
       const r = await deliveryRunAPI.list(params)
       setRuns(r.data || [])
-    } catch {}
+    } catch (e) { showToast(errMsg(e), 'error') }
     setLoading(false)
   }, [filterDate])
 
@@ -705,7 +706,7 @@ export default function Drivers() {
     try {
       const r = await driverAPI.list()
       setDrivers(r.data || [])
-    } catch {}
+    } catch (e) { showToast(errMsg(e), 'error') }
   }, [])
 
   useEffect(() => { loadDrivers() }, [loadDrivers])

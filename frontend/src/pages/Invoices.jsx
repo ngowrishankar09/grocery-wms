@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
+import { showToast, errMsg } from '../utils/toast'
 import { invoiceAPI, orderAPI, customerAPI, skuAPI, settingsAPI, emailAPI } from '../api/client'
 import { printInvoice } from '../utils/invoiceTemplates'
 import {
@@ -684,12 +685,12 @@ function AgingPanel({ onMarkOverdue }) {
     setMarking(true)
     try {
       const r = await invoiceAPI.markOverdueBatch()
-      alert(`${r.data.updated} invoice(s) marked Overdue.`)
+      showToast(`${r.data.updated} invoice(s) marked Overdue.`, 'success')
       onMarkOverdue()
       const r2 = await invoiceAPI.agingSummary()
       setAging(r2.data)
     } catch (e) {
-      alert(e?.response?.data?.detail || 'Failed')
+      showToast(errMsg(e, 'Failed'), 'error')
     } finally { setMarking(false) }
   }
 
@@ -698,9 +699,9 @@ function AgingPanel({ onMarkOverdue }) {
     setReminding(true)
     try {
       const r = await invoiceAPI.sendReminders()
-      alert(r.data?.message || 'Reminders sent.')
+      showToast(r.data?.message || 'Reminders sent.', 'success')
     } catch (e) {
-      alert(e?.response?.data?.detail || 'Failed to send reminders')
+      showToast(errMsg(e, 'Failed to send reminders'), 'error')
     } finally { setReminding(false) }
   }
 
@@ -805,7 +806,7 @@ export default function Invoices() {
       const r = await fn()
       setInvoices(prev => prev.map(i => i.id === id ? r.data : i))
     } catch (e) {
-      alert(e.response?.data?.detail || `${label} failed`)
+      showToast(errMsg(e, `${label} failed`), 'error')
     } finally {
       setBusy(b => { const n = { ...b }; delete n[id]; return n })
     }
@@ -817,7 +818,7 @@ export default function Invoices() {
       await invoiceAPI.delete(id)
       setInvoices(prev => prev.filter(i => i.id !== id))
     } catch (e) {
-      alert(e.response?.data?.detail || 'Delete failed')
+      showToast(errMsg(e, 'Delete failed'), 'error')
     }
   }
 

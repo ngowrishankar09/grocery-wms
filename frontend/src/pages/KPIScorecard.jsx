@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { showToast, errMsg } from '../utils/toast'
 import { TrendingUp, Package, Clock, DollarSign, Target, AlertTriangle, RefreshCw, BarChart2 } from 'lucide-react'
 import { kpiAPI } from '../api/client'
 
@@ -42,7 +43,7 @@ export default function KPIScorecard() {
     try {
       const r = await kpiAPI.scorecard(period)
       setData(r.data)
-    } catch {}
+    } catch (e) { showToast(errMsg(e), 'error') }
     setLoading(false)
   }
 

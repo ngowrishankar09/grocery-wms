@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
+import { showToast, errMsg } from '../utils/toast'
 import { skuAPI, uploadAPI } from '../api/client'
 import api from '../api/client'
 import { useT } from '../i18n/translations'
@@ -374,7 +375,7 @@ export default function Dispatch({ lang }) {
     e.target.value = ''
 
     if (errors.length) {
-      alert('Some files failed:\n' + errors.join('\n'))
+      showToast('Some files failed:\n' + errors.join('\n'), 'error')
     }
     if (!allItems.length) return
 
@@ -403,7 +404,7 @@ export default function Dispatch({ lang }) {
   // ── Submit ───────────────────────────────────────────────
   const handleSubmit = async () => {
     const valid = items.filter(i => i.sku_id && i.cases && parseInt(i.cases) > 0)
-    if (!valid.length) return alert('Add at least one item with a product and case count')
+    if (!valid.length) return showToast('Add at least one item with a product and case count', 'error')
     setSubmitting(true)
     try {
       const r = await dispatchAPI.create({
@@ -418,7 +419,7 @@ export default function Dispatch({ lang }) {
       loadHistory()
       skuAPI.list().then(r => setSkus(r.data))
     } catch (e) {
-      alert('Error: ' + (e.response?.data?.detail || e.message))
+      showToast(errMsg(e, 'Error submitting dispatch'), 'error')
     }
     setSubmitting(false)
   }

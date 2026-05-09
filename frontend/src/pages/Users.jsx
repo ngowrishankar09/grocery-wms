@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { Plus, Edit2, Trash2, X, Save, Shield, Mail, Copy, Check, AlertCircle } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import api from '../api/client'
+import { showToast, errMsg } from '../utils/toast'
 
 const ROLES = ['admin', 'manager', 'warehouse', 'driver', 'readonly']
 const ROLE_COLORS = {
@@ -176,7 +177,7 @@ export default function Users() {
     try {
       const r = await api.get('/users/')
       setUsers(r.data || [])
-    } catch {}
+    } catch (e) { showToast(errMsg(e, 'Failed to load users'), 'error') }
     setLoading(false)
   }, [])
 
@@ -195,7 +196,7 @@ export default function Users() {
       setTempResult(r.data)
       load()
     } catch (e) {
-      alert(e.response?.data?.detail || 'Failed to send welcome email')
+      showToast(errMsg(e, 'Failed to send welcome email'), 'error')
     }
     setSending(prev => ({ ...prev, [u.id]: false }))
   }

@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
+import { showToast, errMsg } from '../utils/toast'
 import { boardAPI } from '../api/client'
 import {
   RefreshCw, ChevronLeft, ChevronRight, Users, Package,
@@ -383,7 +384,7 @@ export default function DispatchBoard() {
       // Refresh summary
       boardAPI.summary(boardDate).then(r => setSummary(r.data)).catch(() => {})
     } catch (e) {
-      alert(e.response?.data?.detail || e.message)
+      showToast(errMsg(e), 'error')
     }
   }
 

@@ -5,6 +5,7 @@ import {
   RefreshCw, Package, ArrowRightLeft, Truck, Search, Lock, Unlock,
   AlertTriangle, ChevronDown
 } from 'lucide-react'
+import { showToast, errMsg } from '../utils/toast'
 
 const TYPE_LABELS = {
   pick:        { label: 'Pick',       color: 'bg-blue-100 text-blue-700',    icon: Package },
@@ -87,7 +88,7 @@ export default function WarehouseTasks() {
   const action = async (id, fn) => {
     setSaving(s => ({ ...s, [id]: true }))
     try { await fn(); await load() }
-    catch (e) { alert(e?.response?.data?.detail || 'Error') }
+    catch (e) { showToast(errMsg(e, 'Action failed'), 'error') }
     finally { setSaving(s => ({ ...s, [id]: false })) }
   }
 

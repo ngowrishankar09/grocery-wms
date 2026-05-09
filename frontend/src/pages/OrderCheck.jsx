@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useMemo } from 'react'
+import { showToast, errMsg } from '../utils/toast'
 import { orderCheckAPI } from '../api/client'
 import {
   Camera, CheckCircle2, XCircle, AlertTriangle, Package,
@@ -491,7 +492,7 @@ export default function OrderCheck() {
       setSavedId(resp.data.id)
       setStep(4)
     } catch (err) {
-      alert('Save failed: ' + (err?.response?.data?.detail || err.message))
+      showToast(errMsg(err, 'Save failed'), 'error')
     } finally {
       setSaving(false)
     }
